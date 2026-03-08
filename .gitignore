@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+
+# Runtime/session/cache
+.session/
+.wwebjs_cache/
+.bot.lock
+temp/
+
+# Generated binaries/tools
+bin/
+
+# Runtime data logs
+src/Documents/
+*.log
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
