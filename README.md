@@ -8,6 +8,7 @@ Este bot recibe un enlace por WhatsApp y responde con el video descargado cuando
 - Facebook
 - Twitter/X
 - Reddit
+- Pinterest
 
 ## Requisitos
 
@@ -51,6 +52,14 @@ Al iniciar, aparecerá un QR en consola. Escanéalo desde WhatsApp (Dispositivos
 ## Uso
 
 Envía un mensaje que contenga un enlace compatible en cualquier chat donde esté tu cuenta vinculada al bot.
+
+Comandos utiles:
+
+- `.ds <url>`: descarga video de plataformas compatibles.
+- `.pt <busqueda> <cantidad>`: busca en Pinterest y envia resultados (maximo 15).
+- `.pt <url_de_pinterest>`: descarga imagen o video de Pinterest en formato compatible con WhatsApp.
+
+Los registros de Pinterest se guardan en `src/Documents/Pt/pt-downloads-log.txt` y `src/Documents/Pt/pt-downloads-log.csv`.
 
 ## Notas
 

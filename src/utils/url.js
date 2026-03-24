@@ -9,7 +9,9 @@ const SUPPORTED_HOSTS = [
     'twitter.com',
     'x.com',
     'reddit.com',
-    'redd.it'
+    'redd.it',
+    'pinterest.com',
+    'pin.it'
 ];
 
 function extractFirstUrl(text) {
@@ -33,5 +35,13 @@ function isSupportedUrl(urlString) {
 module.exports = {
     extractFirstUrl,
     isSupportedUrl,
+    isPinterestUrl: (urlString) => {
+        try {
+            const { hostname } = new URL(urlString);
+            return hostname === 'pin.it' || hostname.endsWith('.pin.it') || hostname === 'pinterest.com' || hostname.endsWith('.pinterest.com');
+        } catch {
+            return false;
+        }
+    },
     SUPPORTED_HOSTS
 };

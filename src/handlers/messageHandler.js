@@ -5,7 +5,10 @@ const { handleMenuCommand } = require('../commands/menuCommand');
 const { handleStickerCommand } = require('../commands/stickerCommand');
 const { handleR34InfoCommand } = require('../commands/r34InfoCommand');
 const { handleR34Command } = require('../commands/r34Command');
+const { handleSearchDownloadCommand } = require('../commands/searchDownloadCommand');
 const { handleDownloadCommand } = require('../commands/downloadCommand');
+const { handleAudioCommand } = require('../commands/audioCommand');
+const { handlePinterestCommand } = require('../commands/pinterestCommand');
 
 const commandHandlers = [
     handlePingCommand,
@@ -13,7 +16,10 @@ const commandHandlers = [
     handleStickerCommand,
     handleR34InfoCommand,
     handleR34Command,
-    handleDownloadCommand
+    handleSearchDownloadCommand,
+    handlePinterestCommand,
+    handleDownloadCommand,
+    handleAudioCommand
 ];
 
 function registerMessageHandler(client) {

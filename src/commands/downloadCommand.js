@@ -7,7 +7,7 @@ const { acquireDownloadSlot, getActiveDownloads } = require('../services/downloa
 const { sendMediaWithFallback } = require('../services/download/sendMedia');
 
 async function handleDownloadCommand({ client, message, lowerText, text, options }) {
-    const isDownloadCommand = lowerText.startsWith('.ds') || lowerText.startsWith('#ds');
+    const isDownloadCommand = /^[.#]ds(?:\s|$)/i.test(text);
     if (!isDownloadCommand) {
         return false;
     }
