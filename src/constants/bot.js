@@ -14,6 +14,8 @@ const MENU_TEXT =
     '• *.mp3 <url>* → audio reproducible\n' +
     '• *.mp3d <url>* → audio como documento\n';
 
+const BLOCKED_USER_MESSAGE = 'Los k 💪 no pueden usar el bot temporalmente';
+
 const BOT_STICKER_NAME = 'VanirBot';
 const R34_ALLOWED_MEDIA_PATH = '/images/';
 const R34_VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.m4v', '.avi']);
@@ -33,6 +35,7 @@ const PT_DOWNLOADS_LOG_CSV_FILE = path.join(PT_INFO_DIRECTORY, 'pt-downloads-log
 
 module.exports = {
     MENU_TEXT,
+    BLOCKED_USER_MESSAGE,
     BOT_STICKER_NAME,
     R34_ALLOWED_MEDIA_PATH,
     R34_VIDEO_EXTENSIONS,
