@@ -48,6 +48,8 @@ client.on('disconnected', (reason) => {
 
 registerMessageHandler(client);
 
+let isShuttingDown = false;
+
 async function startBot() {
     try {
         await acquireProcessLock();
@@ -67,27 +69,29 @@ async function startBot() {
 }
 
 async function shutdown(signal) {
-    try {
-        console.log(`Recibido ${signal}, cerrando bot...`);
-        await client.destroy();
-    } catch {
-        // ignore shutdown errors
-    } finally {
-        await releaseProcessLock();
-        process.exit(0);
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    const isWindowsSigint = process.platform === 'win32' && signal === 'SIGINT';
+
+    if (!isWindowsSigint) {
+        try {
+            await client.destroy();
+        } catch {
+            // ignore shutdown errors
+        }
     }
+
+    await releaseProcessLock();
+    process.exitCode = 0;
 }
 
 process.on('SIGINT', () => {
-    shutdown('SIGINT');
+    void shutdown('SIGINT');
 });
 
 process.on('SIGTERM', () => {
-    shutdown('SIGTERM');
-});
-
-process.on('exit', () => {
-    releaseProcessLock();
+    void shutdown('SIGTERM');
 });
 
 module.exports = {
