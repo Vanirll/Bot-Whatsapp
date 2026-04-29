@@ -8,6 +8,7 @@ const ffmpegPath = require('ffmpeg-static');
 
 const { paths, limits, performance } = require('../config');
 const { PINTEREST_COOKIES } = require('../constants/bot');
+const { searchPinterestWithPuppeteer } = require('./pinterestPuppeteer');
 
 const ytDlp = new YTDlpWrap(paths.ytDlpBinary);
 const execFileAsync = promisify(execFile);
@@ -815,6 +816,20 @@ async function searchPinterestCandidatesByJina(query, maxItems) {
 
     try {
         console.log(`[Pinterest Jina] Intentando petición directa: ${searchUrl.substring(0, 80)}...`);
+
+        // Intento con Puppeteer (si está instalado) para sortear bloqueos y obtener contenido renderizado
+        try {
+            const pp = await searchPinterestWithPuppeteer(query, maxItems);
+            if (Array.isArray(pp) && pp.length > 0) {
+                return pp.map((item) => ({
+                    sourceUrl: item.sourceUrl,
+                    mediaUrl: item.mediaUrl,
+                    title: item.title || null
+                }));
+            }
+        } catch (e) {
+            console.warn('[Pinterest Jina] Puppeteer fallback error:', e?.message || e);
+        }
 
         // Intento directo con cookies (mejor chance si la sesión es válida)
         let response = await fetch(searchUrl, {
