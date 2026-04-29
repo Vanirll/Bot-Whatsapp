@@ -16,7 +16,7 @@ const MENU_TEXT =
 
 const BLOCKED_USER_MESSAGE = 'Los k 💪 no pueden usar el bot temporalmente';
 
-const BOT_STICKER_NAME = 'VanirBot';
+const BOT_STICKER_NAME = 'Bot';
 const R34_ALLOWED_MEDIA_PATH = '/images/';
 const R34_VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.m4v', '.avi']);
 const R34_IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
