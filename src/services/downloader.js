@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const { promisify } = require('node:util');
 const YTDlpWrap = require('yt-dlp-wrap').default;
 const ffmpegPath = require('ffmpeg-static');
@@ -10,6 +11,64 @@ const { paths, limits, performance } = require('../config');
 const ytDlp = new YTDlpWrap(paths.ytDlpBinary);
 const execFileAsync = promisify(execFile);
 const recentPinterestResultsByQuery = new Map();
+const videoInfoCache = new Map();  // Cache videoInfo to avoid redundant queries
+
+async function execFFmpeg(args, opts = {}) {
+    const maxBuffer = Number(opts.maxBufferBytes || performance.ffmpegMaxBufferMb * 1024 * 1024);
+    const timeoutMs = Number(opts.timeoutMs || performance.ffmpegTimeoutMs || 5 * 60 * 1000);
+
+    return new Promise((resolve, reject) => {
+        let finished = false;
+        let stdout = '';
+        let stderr = '';
+
+        const child = spawn(ffmpegPath, args, { windowsHide: true });
+
+        const killAndReject = (err) => {
+            if (finished) return;
+            finished = true;
+            try { child.kill('SIGKILL'); } catch (_) {}
+            reject(err);
+        };
+
+        const timer = setTimeout(() => {
+            killAndReject(new Error(`FFMPEG_TIMEOUT: exceeded ${timeoutMs}ms`));
+        }, timeoutMs);
+
+        child.stdout.on('data', (chunk) => {
+            stdout += String(chunk || '');
+            if (stdout.length > maxBuffer) {
+                clearTimeout(timer);
+                killAndReject(new Error('FFMPEG_STDOUT_EXCEEDED_MAX_BUFFER'));
+            }
+        });
+
+        child.stderr.on('data', (chunk) => {
+            stderr += String(chunk || '');
+            if (stderr.length > maxBuffer) {
+                clearTimeout(timer);
+                killAndReject(new Error('FFMPEG_STDERR_EXCEEDED_MAX_BUFFER'));
+            }
+        });
+
+        child.on('error', (err) => {
+            clearTimeout(timer);
+            killAndReject(err);
+        });
+
+        child.on('close', (code, signal) => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timer);
+            if (code === 0) {
+                resolve({ stdout, stderr });
+            } else {
+                const message = stderr || `FFmpeg exited with code ${code || 'unknown'}${signal ? ' signal ' + signal : ''}`;
+                reject(new Error(message));
+            }
+        });
+    });
+}
 
 function shuffleArray(items) {
     const values = Array.isArray(items) ? [...items] : [];
@@ -162,24 +221,43 @@ async function getYtDlpInfoSafe(input) {
         return null;
     }
 
+    // Check cache first
+    const cacheEntry = videoInfoCache.get(target);
+    if (cacheEntry && cacheEntry.expiresAt > Date.now()) {
+        return cacheEntry.data;
+    }
+
+    let result = null;
     try {
-        return await ytDlp.getVideoInfo(target);
+        result = await ytDlp.getVideoInfo(target);
     } catch {
         // For image-only Pinterest pins, --dump-single-json works better than getVideoInfo().
     }
 
-    try {
-        const raw = await ytDlp.execPromise([
-            target,
-            '--dump-single-json',
-            '--skip-download',
-            '--no-warnings'
-        ]);
+    if (!result) {
+        try {
+            const raw = await ytDlp.execPromise([
+                target,
+                '--dump-single-json',
+                '--skip-download',
+                '--no-warnings'
+            ]);
 
-        return JSON.parse(String(raw || '{}'));
-    } catch {
-        return null;
+            result = JSON.parse(String(raw || '{}'));
+        } catch {
+            return null;
+        }
     }
+
+    // Store in cache with TTL
+    if (result) {
+        videoInfoCache.set(target, {
+            data: result,
+            expiresAt: Date.now() + performance.videoInfoCacheTtlSeconds * 1000
+        });
+    }
+
+    return result;
 }
 
 async function findDownloadedFile(prefix, preferredExtensions = []) {
@@ -248,16 +326,17 @@ async function convertToWhatsAppVideo(inputPath, prefix) {
     ];
 
     try {
-        await execFileAsync(ffmpegPath, args, {
-            windowsHide: true,
-            maxBuffer: performance.ffmpegMaxBufferMb * 1024 * 1024
+        await execFFmpeg(args, {
+            maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
+            timeoutMs: performance.ffmpegTimeoutMs
         });
     } catch (error) {
-        const ffmpegError = String(error?.stderr || error?.message || 'FFMPEG_CONVERSION_FAILED').trim();
+        const ffmpegError = String(error?.stderr || error?.message || error || 'FFMPEG_CONVERSION_FAILED').trim();
         throw new Error(`FFMPEG_CONVERSION_FAILED: ${ffmpegError}`);
+    } finally {
+        await safeCleanup(inputPath);
     }
 
-    await safeCleanup(inputPath);
     return outputPath;
 }
 
@@ -282,16 +361,17 @@ async function convertToMp3(inputPath, prefix) {
     ];
 
     try {
-        await execFileAsync(ffmpegPath, args, {
-            windowsHide: true,
-            maxBuffer: performance.ffmpegMaxBufferMb * 1024 * 1024
+        await execFFmpeg(args, {
+            maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
+            timeoutMs: performance.ffmpegTimeoutMs
         });
     } catch (error) {
-        const ffmpegError = String(error?.stderr || error?.message || 'FFMPEG_CONVERSION_FAILED').trim();
+        const ffmpegError = String(error?.stderr || error?.message || error || 'FFMPEG_CONVERSION_FAILED').trim();
         throw new Error(`FFMPEG_CONVERSION_FAILED: ${ffmpegError}`);
+    } finally {
+        await safeCleanup(inputPath);
     }
 
-    await safeCleanup(inputPath);
     return outputPath;
 }
 
@@ -371,10 +451,16 @@ async function embedMp3CoverArt(audioPath, thumbnailUrl, prefix) {
             outputPath
         ];
 
-        await execFileAsync(ffmpegPath, args, {
-            windowsHide: true,
-            maxBuffer: performance.ffmpegMaxBufferMb * 1024 * 1024
-        });
+        try {
+            await execFFmpeg(args, {
+                maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
+                timeoutMs: performance.ffmpegTimeoutMs
+            });
+        } catch (error) {
+            // if embedding fails, preserve original audio
+            await safeCleanup(outputPath);
+            return audioPath;
+        }
 
         await safeCleanup(audioPath);
         return outputPath;
@@ -406,16 +492,17 @@ async function convertImageToJpg(inputPath, prefix) {
     ];
 
     try {
-        await execFileAsync(ffmpegPath, args, {
-            windowsHide: true,
-            maxBuffer: performance.ffmpegMaxBufferMb * 1024 * 1024
+        await execFFmpeg(args, {
+            maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
+            timeoutMs: performance.ffmpegTimeoutMs
         });
     } catch (error) {
-        const ffmpegError = String(error?.stderr || error?.message || 'FFMPEG_CONVERSION_FAILED').trim();
+        const ffmpegError = String(error?.stderr || error?.message || error || 'FFMPEG_CONVERSION_FAILED').trim();
         throw new Error(`FFMPEG_CONVERSION_FAILED: ${ffmpegError}`);
+    } finally {
+        await safeCleanup(inputPath);
     }
 
-    await safeCleanup(inputPath);
     return outputPath;
 }
 
@@ -992,17 +1079,26 @@ async function downloadVideo(url) {
         '--no-warnings',
         '--no-check-certificates',
         '--concurrent-fragments',
-        '1',
+        String(performance.downloadConcurrentFragments),
         '--retries',
-        '2',
+        String(performance.downloadRetries),
+        '--fragment-retries',
+        String(performance.downloadRetries),
+        '--socket-timeout',
+        '30',
+        '--skip-unavailable-fragments',
         '--max-filesize',
         `${limits.maxFileSizeMb}M`
     ];
 
+    // Add speed limit if configured
+    if (performance.downloadSpeedLimit > 0) {
+        baseArgs.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
+    }
+
     const formatCandidates = [
-        'best*[height<=720][vcodec!=none][acodec!=none]/best[height<=720]/best*[vcodec!=none][acodec!=none]/best',
-        'bestvideo[height<=720][vcodec!=none]/bestvideo[vcodec!=none]',
-        'best*[vcodec!=none][acodec!=none]/best'
+        'best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]',
+        'best[ext=mp4]/best'
     ];
 
     let lastError = null;
@@ -1137,17 +1233,26 @@ async function downloadVideoBySearch(query) {
         '--no-warnings',
         '--no-check-certificates',
         '--concurrent-fragments',
-        '1',
+        String(performance.downloadConcurrentFragments),
         '--retries',
-        '2',
+        String(performance.downloadRetries),
+        '--fragment-retries',
+        String(performance.downloadRetries),
+        '--socket-timeout',
+        '30',
+        '--skip-unavailable-fragments',
         '--max-filesize',
         `${limits.maxFileSizeMb}M`
     ];
 
+    // Add speed limit if configured
+    if (performance.downloadSpeedLimit > 0) {
+        baseArgs.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
+    }
+
     const formatCandidates = [
-        'best*[height<=720][vcodec!=none][acodec!=none]/best[height<=720]/best*[vcodec!=none][acodec!=none]/best',
-        'bestvideo[height<=720][vcodec!=none]/bestvideo[vcodec!=none]',
-        'best*[vcodec!=none][acodec!=none]/best'
+        'best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]',
+        'best[ext=mp4]/best'
     ];
 
     let lastError = null;
@@ -1215,13 +1320,29 @@ async function downloadAudio(url) {
         '--no-playlist',
         '--no-warnings',
         '--no-check-certificates',
+        '--extract-audio',
+        '--audio-format',
+        'mp3',
+        '--audio-quality',
+        '192',
         '--retries',
-        '2',
+        String(performance.downloadRetries),
+        '--fragment-retries',
+        String(performance.downloadRetries),
+        '--socket-timeout',
+        '30',
+        '--concurrent-fragments',
+        String(performance.downloadConcurrentFragments),
         '-f',
         'bestaudio/best',
         '--max-filesize',
         `${limits.maxFileSizeMb}M`
     ];
+
+    // Add speed limit if configured
+    if (performance.downloadSpeedLimit > 0) {
+        args.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
+    }
 
     await ytDlp.execPromise(args);
 
