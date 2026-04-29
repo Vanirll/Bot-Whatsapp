@@ -7,6 +7,7 @@ const YTDlpWrap = require('yt-dlp-wrap').default;
 const ffmpegPath = require('ffmpeg-static');
 
 const { paths, limits, performance } = require('../config');
+const { PINTEREST_COOKIES } = require('../constants/bot');
 
 const ytDlp = new YTDlpWrap(paths.ytDlpBinary);
 const execFileAsync = promisify(execFile);
@@ -27,7 +28,7 @@ async function execFFmpeg(args, opts = {}) {
         const killAndReject = (err) => {
             if (finished) return;
             finished = true;
-            try { child.kill('SIGKILL'); } catch (_) {}
+            try { child.kill('SIGKILL'); } catch (_) { }
             reject(err);
         };
 
@@ -146,31 +147,28 @@ function sanitizeFileName(text, fallback = 'audio') {
         .normalize('NFKD')
         .replace(/[\u0300-\u036f]/g, '')
         .trim();
+    // Robust extraction: support escaped URLs, protocol-less (//), og:image and JSON-LD
+    if (!normalized) return fallback;
 
-    const safe = normalized
-        .replace(/[\\/:*?"<>|\x00-\x1F]/g, ' ')
-        .replace(/[^\w\-. ]+/g, ' ')
+    const cleanedName = normalized
+        .replace(/[^a-zA-Z0-9 \-_.]/g, '')
         .replace(/\s+/g, ' ')
-        .replace(/[. ]+$/g, '')
+        .slice(0, 80)
         .trim();
 
-    const limited = safe.slice(0, 100).trim();
-    return limited || fallback;
-}
+    return cleanedName || fallback;
 
-function resolvePublishedDate(entry) {
-    const uploadDate = String(entry?.upload_date || '').trim();
-    if (/^\d{8}$/.test(uploadDate)) {
-        return `${uploadDate.slice(6, 8)}/${uploadDate.slice(4, 6)}/${uploadDate.slice(0, 4)}`;
+    const limit = Math.max(1, maxItems);
+    const candidates = [];
+    for (let index = 0; index < pinUrls.length && candidates.length < limit; index += 1) {
+        candidates.push({
+            sourceUrl: pinUrls[index],
+            mediaUrl: mediaUrls[index] || null,
+            title: null
+        });
     }
 
-    const timestamp = Number(entry?.timestamp || 0);
-    if (Number.isFinite(timestamp) && timestamp > 0) {
-        const publishedAt = new Date(timestamp * 1000);
-        if (!Number.isNaN(publishedAt.getTime())) {
-            return publishedAt.toLocaleDateString('es-ES');
-        }
-    }
+    return candidates;
 
     return 'Desconocida';
 }
@@ -385,7 +383,8 @@ async function downloadThumbnailToTemp(thumbnailUrl, prefix) {
         headers: {
             'user-agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            accept: 'image/*,*/*;q=0.8'
+            accept: 'image/*,*/*;q=0.8',
+            cookie: String(PINTEREST_COOKIES || '')
         },
         signal: AbortSignal.timeout(15000)
     });
@@ -674,6 +673,7 @@ function normalizePinterestPinUrl(url) {
 
 async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
     const searchQuery = `site:pinterest.com/pin ${query}`;
+    console.log(`[Pinterest DuckDuckGo] Intentando búsqueda: ${searchQuery}`);
     const offsets = [0, 30, 60, 90];
     const found = [];
     const seen = new Set();
@@ -691,7 +691,8 @@ async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
                 headers: {
                     'user-agent':
                         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                    accept: 'text/html,application/xhtml+xml'
+                    accept: 'text/html,application/xhtml+xml',
+                    cookie: String(PINTEREST_COOKIES || '')
                 },
                 signal: AbortSignal.timeout(20000)
             });
@@ -701,16 +702,28 @@ async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
             }
 
             html = await response.text();
-        } catch {
+            if (!html || html.length < 100) {
+                continue;
+            }
+        } catch (error) {
+            console.warn('[Pinterest DuckDuckGo] Fetch error:', error.message);
             continue;
         }
 
         const rawCandidates = [
-            ...[...String(html).matchAll(/uddg=([^&"'\s<>]+)/gi)].map((item) => decodeURIComponent(item[1])),
+            ...[...String(html).matchAll(/uddg=([^&"'\s<>]+)/gi)].map((item) => {
+                try {
+                    return decodeURIComponent(item[1]);
+                } catch {
+                    return null;
+                }
+            }).filter(Boolean),
             ...[...String(html).matchAll(/https?:\/\/[^"'\s<>]+/gi)].map((item) => item[0])
         ];
 
         for (const rawLink of rawCandidates) {
+            if (!rawLink) continue;
+
             const decoded = parseDuckDuckGoRedirect(rawLink) || rawLink;
             const normalizedPinUrl = normalizePinterestPinUrl(decoded);
             if (!normalizedPinUrl) {
@@ -730,12 +743,19 @@ async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
         }
     }
 
+    if (found.length > 0) {
+        console.log(`[Pinterest DuckDuckGo] ✅ Encontrados ${found.length} resultados`);
+    } else {
+        console.warn('[Pinterest DuckDuckGo] ⚠️ No se encontraron resultados');
+    }
+
     return found;
 }
 
 function extractPinterestCandidatesFromText(text, maxItems) {
     const rawText = String(text || '');
-    const structuredMatches = [...rawText.matchAll(/\[!\[Image\s+\d+:\s*([^\]]+)\]\((https?:\/\/i\.pinimg\.com\/[^)\s]+)\)\]\((https?:\/\/(?:www\.|[a-z]{2}\.)?pinterest\.com\/pin\/[^)\s]+)\)/gi)];
+    const cleaned = rawText.replace(/\\\//g, '/');
+    const structuredMatches = [...cleaned.matchAll(/\[!\[Image\s+\d+:\s*([^\]]+)\]\((https?:\/\/i\.pinimg\.com\/[^)\s]+)\)\]\((https?:\/\/(?:www\.|[a-z]{2}\.)?pinterest\.com\/pin\/[^)\s]+)\)/gi)];
 
     const structuredCandidates = [];
     const structuredSeen = new Set();
@@ -794,22 +814,57 @@ async function searchPinterestCandidatesByJina(query, maxItems) {
     const proxyUrl = `https://r.jina.ai/http://${searchUrl.replace(/^https?:\/\//, '')}`;
 
     try {
-        const response = await fetch(proxyUrl, {
+        console.log(`[Pinterest Jina] Intentando petición directa: ${searchUrl.substring(0, 80)}...`);
+
+        // Intento directo con cookies (mejor chance si la sesión es válida)
+        let response = await fetch(searchUrl, {
             headers: {
                 'user-agent':
                     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                accept: 'text/plain, text/markdown'
+                accept: 'text/html,application/xhtml+xml',
+                cookie: String(PINTEREST_COOKIES || '')
             },
             signal: AbortSignal.timeout(25000)
         });
 
-        if (!response.ok) {
+        let content = null;
+
+        if (response.ok) {
+            content = await response.text();
+            console.log(`[Pinterest Jina] Directo: recibido ${String(content?.length || 0)} bytes`);
+        } else {
+            console.warn(`[Pinterest Jina] Directo HTTP ${response.status}, intentando proxy jina.ai`);
+            // Fallback al proxy jina.ai
+            response = await fetch(proxyUrl, {
+                headers: {
+                    'user-agent':
+                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                    accept: 'text/plain, text/markdown'
+                },
+                signal: AbortSignal.timeout(25000)
+            });
+
+            if (!response.ok) {
+                console.warn(`[Pinterest Jina] Proxy HTTP ${response.status}`);
+                return [];
+            }
+
+            content = await response.text();
+            console.log(`[Pinterest Jina] Proxy: recibido ${String(content?.length || 0)} bytes`);
+        }
+
+        if (!content || content.length < 100) {
+            console.warn(`[Pinterest Jina] Contenido muy pequeño (${content?.length || 0} bytes)`);
             return [];
         }
 
-        const content = await response.text();
-        return extractPinterestCandidatesFromText(content, maxItems);
-    } catch {
+        const extracted = extractPinterestCandidatesFromText(content, maxItems);
+        if (extracted.length === 0) {
+            console.warn('[Pinterest Jina] No se extrajeron URLs del contenido');
+        }
+        return extracted;
+    } catch (error) {
+        console.warn('[Pinterest Jina] Error:', error.message);
         return [];
     }
 }
@@ -879,10 +934,14 @@ async function searchPinterestMedia(query, limit = 3) {
     const safeLimit = Math.max(1, Math.min(15, Number(limit) || 3));
     const poolSize = Math.max(20, safeLimit * 6);
 
+    console.log(`[Pinterest] Buscando: "${searchQuery}"`);
+
     const [preferredCandidates, fallbackPinUrls] = await Promise.all([
         searchPinterestCandidatesByJina(searchQuery, poolSize),
         searchPinterestPinUrlsByDuckDuckGo(searchQuery, poolSize)
     ]);
+
+    console.log(`[Pinterest] Jina: ${preferredCandidates.length}, DuckDuckGo: ${fallbackPinUrls.length}`);
 
     // Merge sources to avoid being stuck with the same first Pinterest rows.
     const mergedCandidates = [
@@ -945,7 +1004,14 @@ async function searchPinterestMedia(query, limit = 3) {
         });
     }
 
-    return pickPinterestResults(searchQuery, baseResults, safeLimit);
+    const finalResults = pickPinterestResults(searchQuery, baseResults, safeLimit);
+    console.log(`[Pinterest] Resultados finales: ${finalResults.length}/${safeLimit}`);
+
+    if (finalResults.length === 0) {
+        console.warn('[Pinterest] ⚠️ Sin resultados encontrados');
+    }
+
+    return finalResults;
 }
 
 async function downloadPinterestMedia(url, preferredTitle = 'Pinterest') {
