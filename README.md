@@ -20,6 +20,8 @@ Este bot recibe un enlace por WhatsApp y responde con el video descargado cuando
 
 ```bash
 npm install
+
+npm install puppeter-core
 ```
 
 ## Configuración
