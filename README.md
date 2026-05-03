@@ -9,6 +9,7 @@ Este bot recibe un enlace por WhatsApp y responde con el video descargado cuando
 - Twitter/X
 - Reddit
 - Pinterest
+- Proximas herramientas
 
 ## Requisitos
 
