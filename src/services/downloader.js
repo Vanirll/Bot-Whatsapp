@@ -1152,6 +1152,9 @@ async function downloadVideo(url) {
         metadata = null;
     }
 
+    const isTikTok = /tiktok\.com/i.test(url);
+    const useBrowserCookies = performance.useBrowserCookies && isTikTok;
+
     const baseArgs = [
         url,
         '-o',
@@ -1172,15 +1175,42 @@ async function downloadVideo(url) {
         `${limits.maxFileSizeMb}M`
     ];
 
+    // Add headers and cookies for TikTok to bypass 403 restrictions
+    if (isTikTok) {
+        baseArgs.push('--add-header', 'Referer:https://www.tiktok.com/');
+        baseArgs.push('--add-header', 'Origin:https://www.tiktok.com');
+        baseArgs.push('--add-header', 'Accept-Language:es-ES,es;q=0.9,en;q=0.8');
+        baseArgs.push('--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        baseArgs.push('--impersonate', 'chrome');
+        baseArgs.push('--concurrent-fragments', '1');
+        // Avoid TikTok rate limits (HTTP 429)
+        baseArgs.push('--sleep-interval', '4');
+        baseArgs.push('--max-sleep-interval', '8');
+        baseArgs.push('--retry-sleep', '10');
+        if (performance.tikTokProxyUrl) {
+            baseArgs.push('--proxy', performance.tikTokProxyUrl);
+        }
+        if (performance.tikTokCookiesFile) {
+            baseArgs.push('--cookies', performance.tikTokCookiesFile);
+        } else if (useBrowserCookies) {
+            baseArgs.push('--cookies-from-browser', performance.browserForCookies);
+        }
+    }
+
     // Add speed limit if configured
     if (performance.downloadSpeedLimit > 0) {
         baseArgs.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
     }
 
-    const formatCandidates = [
-        'best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]',
-        'best[ext=mp4]/best'
-    ];
+    const formatCandidates = isTikTok
+        ? [
+            'bestvideo+bestaudio/best',
+            'best'
+        ]
+        : [
+            'best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]',
+            'best[ext=mp4]/best'
+        ];
 
     let lastError = null;
     for (let index = 0; index < formatCandidates.length; index += 1) {
@@ -1192,10 +1222,28 @@ async function downloadVideo(url) {
         } catch (error) {
             lastError = error;
             const message = String(error?.stderr || error?.message || '');
+            
+            // If TikTok download fails with browser cookies, retry without them
+            if (useBrowserCookies && /tiktok|403|authorization|cookie/i.test(message)) {
+                console.log('TikTok descarga falló con cookies del navegador, reintentando sin ellas...');
+                // Remove cookies args and retry
+                const argsWithoutCookies = baseArgs.filter((arg, idx, arr) => {
+                    return !(arg === '--cookies-from-browser' || (idx > 0 && arr[idx - 1] === '--cookies-from-browser'));
+                });
+                
+                try {
+                    await ytDlp.execPromise([...argsWithoutCookies, '-f', format]);
+                    lastError = null;
+                    break;
+                } catch (retryError) {
+                    lastError = retryError;
+                }
+            }
+            
             const canRetry = /requested format is not available/i.test(message);
             const isLastCandidate = index === formatCandidates.length - 1;
             if (!canRetry || isLastCandidate) {
-                throw error;
+                throw lastError || error;
             }
         }
     }
