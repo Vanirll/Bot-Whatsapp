@@ -9,6 +9,7 @@ async function sendMediaWithFallback(client, chatId, filePath, title, allowDocum
     const media = MessageMedia.fromFilePath(filePath);
 
     const trySend = async (asDocument) => {
+        console.log(); // ← asegura nueva línea después del progreso de descarga
         const startAt = Date.now();
         process.stdout.write(`📤 Enviando${asDocument ? ' (documento)' : ''}: ${fileSizeMb} MB...`);
 

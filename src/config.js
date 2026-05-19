@@ -41,7 +41,7 @@ const paths = {
 
 const limits = {
     maxFileSizeMb,
-    maxFileSizeBytes: maxFileSizeMb * 1024 * 1024
+    maxFileSizeBytes: maxFileSizeMb > 0 ? maxFileSizeMb * 1024 * 1024 : Infinity
 };
 
 const performance = {

@@ -34,8 +34,16 @@ client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
 });
 
+client.on('loading_screen', (percent, message) => {
+    process.stdout.write(`\r⏳ Cargando WhatsApp: ${percent}% - ${message}   `);
+});
+
+client.on('authenticated', () => {
+    console.log('\n✅ Sesión autenticada');
+});
+
 client.on('ready', () => {
-    console.log('Bot listo. Usa .menu/#menu para ayuda y .ds/#ds para descargar.');
+    console.log('\n✅ Bot listo. Usa .menu/#menu para ayuda y .ds/#ds para descargar.');
 });
 
 client.on('auth_failure', (msg) => {

@@ -1154,7 +1154,7 @@ async function downloadPinterestMedia(url, preferredTitle = "Pinterest") {
     let downloadedPath = null;
 
     try {
-        await ytDlp.execPromise([
+        const ptArgs = [
             sourceUrl,
             "-o",
             outputTemplate,
@@ -1163,9 +1163,14 @@ async function downloadPinterestMedia(url, preferredTitle = "Pinterest") {
             "--no-check-certificates",
             "--retries",
             "2",
-            "--max-filesize",
-            `${limits.maxFileSizeMb}M`,
-        ]);
+        ];
+
+        // Add max-filesize only if configured
+        if (limits.maxFileSizeMb > 0) {
+            ptArgs.push("--max-filesize", `${limits.maxFileSizeMb}M`);
+        }
+
+        await ytDlp.execPromise(ptArgs);
 
         downloadedPath = await findDownloadedFile(id, [
             ".mp4",
@@ -1267,7 +1272,9 @@ async function downloadVideo(url) {
     const id = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const outputTemplate = path.join(paths.tempDir, `${id}.%(ext)s`);
 
-    // metadata se obtiene después de descargar (estará en caché, es instantáneo)
+    let metadata = null;
+    metadata = await getYtDlpInfoSafe(url);
+
     const isTikTok = /tiktok\.com/i.test(url);
     const useBrowserCookies = performance.useBrowserCookies && isTikTok;
 
@@ -1287,9 +1294,12 @@ async function downloadVideo(url) {
         "--socket-timeout",
         "30",
         "--skip-unavailable-fragments",
-        "--max-filesize",
-        `${limits.maxFileSizeMb}M`,
     ];
+
+    // Add max-filesize only if configured
+    if (limits.maxFileSizeMb > 0) {
+        baseArgs.push("--max-filesize", `${limits.maxFileSizeMb}M`);
+    }
 
     // Add headers and cookies for TikTok to bypass 403 restrictions
     if (isTikTok) {
@@ -1303,8 +1313,8 @@ async function downloadVideo(url) {
         baseArgs.push("--impersonate", "chrome");
         baseArgs.push("--concurrent-fragments", "1");
         // Avoid TikTok rate limits (HTTP 429)
-        baseArgs.push("--sleep-interval", "1");
-        baseArgs.push("--max-sleep-interval", "2");
+        baseArgs.push("--sleep-interval", "3");
+        baseArgs.push("--max-sleep-interval", "4");
         baseArgs.push("--retry-sleep", "10");
         if (performance.tikTokProxyUrl) {
             baseArgs.push("--proxy", performance.tikTokProxyUrl);
@@ -1408,9 +1418,7 @@ async function downloadVideo(url) {
         );
     }
 
-    // Obtener metadata del caché (ya fue consultada por yt-dlp al descargar)
-    const cachedInfo = videoInfoCache.get(url);
-    const title = cachedInfo?.data?.title || "Video descargado";
+    const title = metadata?.title || "Video descargado";
     return { filePath, title };
 }
 
@@ -1521,9 +1529,12 @@ async function downloadVideoBySearch(query) {
         "--socket-timeout",
         "30",
         "--skip-unavailable-fragments",
-        "--max-filesize",
-        `${limits.maxFileSizeMb}M`,
     ];
+
+    // Add max-filesize only if configured
+    if (limits.maxFileSizeMb > 0) {
+        baseArgs.push("--max-filesize", `${limits.maxFileSizeMb}M`);
+    }
 
     // Add speed limit if configured
     if (performance.downloadSpeedLimit > 0) {
@@ -1626,9 +1637,12 @@ async function downloadAudio(url) {
         String(performance.downloadConcurrentFragments),
         "-f",
         "bestaudio/best",
-        "--max-filesize",
-        `${limits.maxFileSizeMb}M`,
     ];
+
+    // Add max-filesize only if configured
+    if (limits.maxFileSizeMb > 0) {
+        args.push("--max-filesize", `${limits.maxFileSizeMb}M`);
+    }
 
     // Add speed limit if configured
     if (performance.downloadSpeedLimit > 0) {
