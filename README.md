@@ -27,11 +27,7 @@ npm install puppeter-core
 
 ## Configuración
 
-1. Crea tu archivo de entorno:
-
-```bash
-copy .env.example .env
-```
+1. Edita directamente el archivo `.env`.
 
 2. (Opcional) Ajusta:
 
@@ -41,6 +37,15 @@ copy .env.example .env
 - `SESSION_PATH` (por defecto `.session`)
 - `ALLOW_DOCUMENT_FALLBACK` (por defecto `false`; si es `true`, al fallar video lo envía como documento)
 - `KEEP_DOWNLOADED_FILES` (por defecto `false`; si es `true`, guarda videos en `temp/`)
+- `BLOCKED_NUMBERS` (opcional; lista de números bloqueados separados por coma, espacio o `;`)
+
+Ejemplo:
+
+```env
+BLOCKED_NUMBERS=5491111111111,5492222222222
+```
+
+El mensaje que se envía a usuarios bloqueados se define en `src/constants/bot.js` con la constante `BLOCKED_USER_MESSAGE`.
 
 ## Ejecutar
 
