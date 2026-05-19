@@ -54,7 +54,12 @@ async function startBot() {
     try {
         await acquireProcessLock();
         await ensureYtDlpBinary();
-        await client.initialize();
+        await Promise.race([
+            client.initialize(),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('INIT_TIMEOUT')), 60_000)
+            )
+        ]);
     } catch (err) {
         if (String(err?.message || '').startsWith('BOT_ALREADY_RUNNING:')) {
             const pid = String(err.message).split(':')[1] || 'desconocido';

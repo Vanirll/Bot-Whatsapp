@@ -1,35 +1,41 @@
-const fs = require('node:fs/promises');
-const path = require('node:path');
-const { execFile } = require('node:child_process');
-const { spawn } = require('node:child_process');
-const { promisify } = require('node:util');
-const YTDlpWrap = require('yt-dlp-wrap').default;
-const ffmpegPath = require('ffmpeg-static');
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const { execFile } = require("node:child_process");
+const { spawn } = require("node:child_process");
+const { promisify } = require("node:util");
+const YTDlpWrap = require("yt-dlp-wrap").default;
+const ffmpegPath = require("ffmpeg-static");
 
-const { paths, limits, performance } = require('../config');
-const { PINTEREST_COOKIES } = require('../constants/bot');
-const { searchPinterestWithPuppeteer } = require('./pinterestPuppeteer');
+const { paths, limits, performance } = require("../config");
+const { PINTEREST_COOKIES } = require("../constants/bot");
+const { searchPinterestWithPuppeteer } = require("./pinterestPuppeteer");
 
 const ytDlp = new YTDlpWrap(paths.ytDlpBinary);
 const execFileAsync = promisify(execFile);
 const recentPinterestResultsByQuery = new Map();
-const videoInfoCache = new Map();  // Cache videoInfo to avoid redundant queries
+const videoInfoCache = new Map(); // Cache videoInfo to avoid redundant queries
 
 async function execFFmpeg(args, opts = {}) {
-    const maxBuffer = Number(opts.maxBufferBytes || performance.ffmpegMaxBufferMb * 1024 * 1024);
-    const timeoutMs = Number(opts.timeoutMs || performance.ffmpegTimeoutMs || 5 * 60 * 1000);
+    const maxBuffer = Number(
+        opts.maxBufferBytes || performance.ffmpegMaxBufferMb * 1024 * 1024,
+    );
+    const timeoutMs = Number(
+        opts.timeoutMs || performance.ffmpegTimeoutMs || 5 * 60 * 1000,
+    );
 
     return new Promise((resolve, reject) => {
         let finished = false;
-        let stdout = '';
-        let stderr = '';
+        let stdout = "";
+        let stderr = "";
 
         const child = spawn(ffmpegPath, args, { windowsHide: true });
 
         const killAndReject = (err) => {
             if (finished) return;
             finished = true;
-            try { child.kill('SIGKILL'); } catch (_) { }
+            try {
+                child.kill("SIGKILL");
+            } catch (_) { }
             reject(err);
         };
 
@@ -37,35 +43,37 @@ async function execFFmpeg(args, opts = {}) {
             killAndReject(new Error(`FFMPEG_TIMEOUT: exceeded ${timeoutMs}ms`));
         }, timeoutMs);
 
-        child.stdout.on('data', (chunk) => {
-            stdout += String(chunk || '');
+        child.stdout.on("data", (chunk) => {
+            stdout += String(chunk || "");
             if (stdout.length > maxBuffer) {
                 clearTimeout(timer);
-                killAndReject(new Error('FFMPEG_STDOUT_EXCEEDED_MAX_BUFFER'));
+                killAndReject(new Error("FFMPEG_STDOUT_EXCEEDED_MAX_BUFFER"));
             }
         });
 
-        child.stderr.on('data', (chunk) => {
-            stderr += String(chunk || '');
+        child.stderr.on("data", (chunk) => {
+            stderr += String(chunk || "");
             if (stderr.length > maxBuffer) {
                 clearTimeout(timer);
-                killAndReject(new Error('FFMPEG_STDERR_EXCEEDED_MAX_BUFFER'));
+                killAndReject(new Error("FFMPEG_STDERR_EXCEEDED_MAX_BUFFER"));
             }
         });
 
-        child.on('error', (err) => {
+        child.on("error", (err) => {
             clearTimeout(timer);
             killAndReject(err);
         });
 
-        child.on('close', (code, signal) => {
+        child.on("close", (code, signal) => {
             if (finished) return;
             finished = true;
             clearTimeout(timer);
             if (code === 0) {
                 resolve({ stdout, stderr });
             } else {
-                const message = stderr || `FFmpeg exited with code ${code || 'unknown'}${signal ? ' signal ' + signal : ''}`;
+                const message =
+                    stderr ||
+                    `FFmpeg exited with code ${code || "unknown"}${signal ? " signal " + signal : ""}`;
                 reject(new Error(message));
             }
         });
@@ -82,11 +90,13 @@ function shuffleArray(items) {
 }
 
 function createPinterestResultKey(item) {
-    return String(item?.mediaUrl || item?.sourceUrl || '').trim();
+    return String(item?.mediaUrl || item?.sourceUrl || "").trim();
 }
 
 function normalizeQueryKey(query) {
-    return String(query || '').trim().toLowerCase();
+    return String(query || "")
+        .trim()
+        .toLowerCase();
 }
 
 function getRecentPinterestResultSet(query) {
@@ -143,17 +153,17 @@ function pickPinterestResults(query, candidates, limit) {
     return selected;
 }
 
-function sanitizeFileName(text, fallback = 'audio') {
-    const normalized = String(text || '')
-        .normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
+function sanitizeFileName(text, fallback = "audio") {
+    const normalized = String(text || "")
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
         .trim();
     // Robust extraction: support escaped URLs, protocol-less (//), og:image and JSON-LD
     if (!normalized) return fallback;
 
     const cleanedName = normalized
-        .replace(/[^a-zA-Z0-9 \-_.]/g, '')
-        .replace(/\s+/g, ' ')
+        .replace(/[^a-zA-Z0-9 \-_.]/g, "")
+        .replace(/\s+/g, " ")
         .slice(0, 80)
         .trim();
 
@@ -161,23 +171,27 @@ function sanitizeFileName(text, fallback = 'audio') {
 
     const limit = Math.max(1, maxItems);
     const candidates = [];
-    for (let index = 0; index < pinUrls.length && candidates.length < limit; index += 1) {
+    for (
+        let index = 0;
+        index < pinUrls.length && candidates.length < limit;
+        index += 1
+    ) {
         candidates.push({
             sourceUrl: pinUrls[index],
             mediaUrl: mediaUrls[index] || null,
-            title: null
+            title: null,
         });
     }
 
     return candidates;
 
-    return 'Desconocida';
+    return "Desconocida";
 }
 
 function resolveVideoSizeMb(entry) {
     const bytes = Number(entry?.filesize || entry?.filesize_approx || 0);
     if (!Number.isFinite(bytes) || bytes <= 0) {
-        return 'Desconocido';
+        return "Desconocido";
     }
 
     const mb = bytes / (1024 * 1024);
@@ -209,13 +223,13 @@ async function ensureYtDlpBinary() {
     try {
         await fs.access(paths.ytDlpBinary);
     } catch {
-        console.log('Descargando yt-dlp...');
+        console.log("Descargando yt-dlp...");
         await YTDlpWrap.downloadFromGithub(paths.ytDlpBinary);
     }
 }
 
 async function getYtDlpInfoSafe(input) {
-    const target = String(input || '').trim();
+    const target = String(input || "").trim();
     if (!target) {
         return null;
     }
@@ -237,12 +251,12 @@ async function getYtDlpInfoSafe(input) {
         try {
             const raw = await ytDlp.execPromise([
                 target,
-                '--dump-single-json',
-                '--skip-download',
-                '--no-warnings'
+                "--dump-single-json",
+                "--skip-download",
+                "--no-warnings",
             ]);
 
-            result = JSON.parse(String(raw || '{}'));
+            result = JSON.parse(String(raw || "{}"));
         } catch {
             return null;
         }
@@ -252,7 +266,7 @@ async function getYtDlpInfoSafe(input) {
     if (result) {
         videoInfoCache.set(target, {
             data: result,
-            expiresAt: Date.now() + performance.videoInfoCacheTtlSeconds * 1000
+            expiresAt: Date.now() + performance.videoInfoCacheTtlSeconds * 1000,
         });
     }
 
@@ -263,18 +277,20 @@ async function findDownloadedFile(prefix, preferredExtensions = []) {
     const entries = await fs.readdir(paths.tempDir);
     const matchedEntries = entries.filter((name) => name.startsWith(prefix));
 
-    const fallbackExtensions = ['.mp4', '.webm', '.mkv', '.mov', '.m4v', '.avi'];
-    const validExtensions = Array.isArray(preferredExtensions) && preferredExtensions.length > 0
-        ? preferredExtensions
-        : fallbackExtensions;
+    const fallbackExtensions = [".mp4", ".webm", ".mkv", ".mov", ".m4v", ".avi"];
+    const validExtensions =
+        Array.isArray(preferredExtensions) && preferredExtensions.length > 0
+            ? preferredExtensions
+            : fallbackExtensions;
 
-    const match = matchedEntries.find((name) => {
-        const extension = path.extname(name).toLowerCase();
-        return validExtensions.includes(extension);
-    }) || matchedEntries[0];
+    const match =
+        matchedEntries.find((name) => {
+            const extension = path.extname(name).toLowerCase();
+            return validExtensions.includes(extension);
+        }) || matchedEntries[0];
 
     if (!match) {
-        throw new Error('No se encontró el archivo descargado.');
+        throw new Error("No se encontró el archivo descargado.");
     }
 
     return path.join(paths.tempDir, match);
@@ -292,45 +308,47 @@ async function safeCleanup(filePath) {
 
 async function convertToWhatsAppVideo(inputPath, prefix) {
     if (!ffmpegPath) {
-        throw new Error('FFMPEG_NOT_AVAILABLE');
+        throw new Error("FFMPEG_NOT_AVAILABLE");
     }
 
     const outputPath = path.join(paths.tempDir, `${prefix}-wa.mp4`);
     await safeCleanup(outputPath);
 
     const args = [
-        '-y',
-        '-i',
+        "-y",
+        "-i",
         inputPath,
-        '-f',
-        'lavfi',
-        '-i',
-        'anullsrc=channel_layout=stereo:sample_rate=44100',
-        '-shortest',
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-crf',
-        '27',
-        '-pix_fmt',
-        'yuv420p',
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        '-movflags',
-        '+faststart',
-        outputPath
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-shortest",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "27",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-movflags",
+        "+faststart",
+        outputPath,
     ];
 
     try {
         await execFFmpeg(args, {
             maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
-            timeoutMs: performance.ffmpegTimeoutMs
+            timeoutMs: performance.ffmpegTimeoutMs,
         });
     } catch (error) {
-        const ffmpegError = String(error?.stderr || error?.message || error || 'FFMPEG_CONVERSION_FAILED').trim();
+        const ffmpegError = String(
+            error?.stderr || error?.message || error || "FFMPEG_CONVERSION_FAILED",
+        ).trim();
         throw new Error(`FFMPEG_CONVERSION_FAILED: ${ffmpegError}`);
     } finally {
         await safeCleanup(inputPath);
@@ -341,31 +359,33 @@ async function convertToWhatsAppVideo(inputPath, prefix) {
 
 async function convertToMp3(inputPath, prefix) {
     if (!ffmpegPath) {
-        throw new Error('FFMPEG_NOT_AVAILABLE');
+        throw new Error("FFMPEG_NOT_AVAILABLE");
     }
 
     const outputPath = path.join(paths.tempDir, `${prefix}-audio.mp3`);
     await safeCleanup(outputPath);
 
     const args = [
-        '-y',
-        '-i',
+        "-y",
+        "-i",
         inputPath,
-        '-vn',
-        '-c:a',
-        'libmp3lame',
-        '-q:a',
-        '2',
-        outputPath
+        "-vn",
+        "-c:a",
+        "libmp3lame",
+        "-q:a",
+        "2",
+        outputPath,
     ];
 
     try {
         await execFFmpeg(args, {
             maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
-            timeoutMs: performance.ffmpegTimeoutMs
+            timeoutMs: performance.ffmpegTimeoutMs,
         });
     } catch (error) {
-        const ffmpegError = String(error?.stderr || error?.message || error || 'FFMPEG_CONVERSION_FAILED').trim();
+        const ffmpegError = String(
+            error?.stderr || error?.message || error || "FFMPEG_CONVERSION_FAILED",
+        ).trim();
         throw new Error(`FFMPEG_CONVERSION_FAILED: ${ffmpegError}`);
     } finally {
         await safeCleanup(inputPath);
@@ -375,19 +395,19 @@ async function convertToMp3(inputPath, prefix) {
 }
 
 async function downloadThumbnailToTemp(thumbnailUrl, prefix) {
-    const sourceUrl = String(thumbnailUrl || '').trim();
+    const sourceUrl = String(thumbnailUrl || "").trim();
     if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {
         return null;
     }
 
     const response = await fetch(sourceUrl, {
         headers: {
-            'user-agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            accept: 'image/*,*/*;q=0.8',
-            cookie: String(PINTEREST_COOKIES || '')
+            "user-agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            accept: "image/*,*/*;q=0.8",
+            cookie: String(PINTEREST_COOKIES || ""),
         },
-        signal: AbortSignal.timeout(15000)
+        signal: AbortSignal.timeout(15000),
     });
 
     if (!response.ok) {
@@ -395,15 +415,23 @@ async function downloadThumbnailToTemp(thumbnailUrl, prefix) {
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    const contentType = response.headers.get('content-type') || '';
+    const contentType = response.headers.get("content-type") || "";
     const extensionFromType = inferExtensionFromContentType(contentType);
-    const extensionFromUrl = path.extname(sourceUrl.split('?')[0] || '').toLowerCase();
-    const extension = extensionFromType || extensionFromUrl || '.jpg';
+    const extensionFromUrl = path
+        .extname(sourceUrl.split("?")[0] || "")
+        .toLowerCase();
+    const extension = extensionFromType || extensionFromUrl || ".jpg";
 
-    const tempThumbnailPath = await buildUniqueFilePath(paths.tempDir, `${prefix}-thumb`, extension);
+    const tempThumbnailPath = await buildUniqueFilePath(
+        paths.tempDir,
+        `${prefix}-thumb`,
+        extension,
+    );
     await fs.writeFile(tempThumbnailPath, buffer);
 
-    const isNativeCoverFormat = ['.jpg', '.jpeg', '.png'].includes(path.extname(tempThumbnailPath).toLowerCase());
+    const isNativeCoverFormat = [".jpg", ".jpeg", ".png"].includes(
+        path.extname(tempThumbnailPath).toLowerCase(),
+    );
     if (isNativeCoverFormat) {
         return tempThumbnailPath;
     }
@@ -427,34 +455,34 @@ async function embedMp3CoverArt(audioPath, thumbnailUrl, prefix) {
         }
 
         const args = [
-            '-y',
-            '-i',
+            "-y",
+            "-i",
             audioPath,
-            '-i',
+            "-i",
             thumbnailPath,
-            '-map',
-            '0:a',
-            '-map',
-            '1:v',
-            '-c:a',
-            'copy',
-            '-c:v',
-            'mjpeg',
-            '-disposition:v',
-            'attached_pic',
-            '-id3v2_version',
-            '3',
-            '-metadata:s:v',
-            'title=Cover',
-            '-metadata:s:v',
-            'comment=Cover (front)',
-            outputPath
+            "-map",
+            "0:a",
+            "-map",
+            "1:v",
+            "-c:a",
+            "copy",
+            "-c:v",
+            "mjpeg",
+            "-disposition:v",
+            "attached_pic",
+            "-id3v2_version",
+            "3",
+            "-metadata:s:v",
+            "title=Cover",
+            "-metadata:s:v",
+            "comment=Cover (front)",
+            outputPath,
         ];
 
         try {
             await execFFmpeg(args, {
                 maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
-                timeoutMs: performance.ffmpegTimeoutMs
+                timeoutMs: performance.ffmpegTimeoutMs,
             });
         } catch (error) {
             // if embedding fails, preserve original audio
@@ -474,30 +502,32 @@ async function embedMp3CoverArt(audioPath, thumbnailUrl, prefix) {
 
 async function convertImageToJpg(inputPath, prefix) {
     if (!ffmpegPath) {
-        throw new Error('FFMPEG_NOT_AVAILABLE');
+        throw new Error("FFMPEG_NOT_AVAILABLE");
     }
 
     const outputPath = path.join(paths.tempDir, `${prefix}-image.jpg`);
     await safeCleanup(outputPath);
 
     const args = [
-        '-y',
-        '-i',
+        "-y",
+        "-i",
         inputPath,
-        '-frames:v',
-        '1',
-        '-q:v',
-        '2',
-        outputPath
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        outputPath,
     ];
 
     try {
         await execFFmpeg(args, {
             maxBufferBytes: performance.ffmpegMaxBufferMb * 1024 * 1024,
-            timeoutMs: performance.ffmpegTimeoutMs
+            timeoutMs: performance.ffmpegTimeoutMs,
         });
     } catch (error) {
-        const ffmpegError = String(error?.stderr || error?.message || error || 'FFMPEG_CONVERSION_FAILED').trim();
+        const ffmpegError = String(
+            error?.stderr || error?.message || error || "FFMPEG_CONVERSION_FAILED",
+        ).trim();
         throw new Error(`FFMPEG_CONVERSION_FAILED: ${ffmpegError}`);
     } finally {
         await safeCleanup(inputPath);
@@ -507,27 +537,31 @@ async function convertImageToJpg(inputPath, prefix) {
 }
 
 function normalizePinterestMediaUrl(url) {
-    const raw = String(url || '').trim();
+    const raw = String(url || "").trim();
     if (!raw || !/^https?:\/\//i.test(raw)) {
         return null;
     }
 
     // Remove transient query params to improve dedupe and stable file extensions.
-    return raw.split('?')[0];
+    return raw.split("?")[0];
 }
 
 function resolvePinterestMediaType(mediaUrl) {
-    const extension = path.extname(String(mediaUrl || '').toLowerCase());
-    if (['.mp4', '.webm', '.mkv', '.mov', '.m4v', '.avi', '.gif'].includes(extension)) {
-        return 'video';
+    const extension = path.extname(String(mediaUrl || "").toLowerCase());
+    if (
+        [".mp4", ".webm", ".mkv", ".mov", ".m4v", ".avi", ".gif"].includes(
+            extension,
+        )
+    ) {
+        return "video";
     }
 
-    return 'image';
+    return "image";
 }
 
-function normalizePinterestTitle(rawTitle, fallback = 'Pinterest') {
-    const base = String(rawTitle || '')
-        .replace(/\s+/g, ' ')
+function normalizePinterestTitle(rawTitle, fallback = "Pinterest") {
+    const base = String(rawTitle || "")
+        .replace(/\s+/g, " ")
         .trim();
 
     if (!base) {
@@ -535,7 +569,10 @@ function normalizePinterestTitle(rawTitle, fallback = 'Pinterest') {
     }
 
     // Pinterest often returns keyword-style titles with many commas.
-    const parts = base.split(',').map((part) => part.trim()).filter(Boolean);
+    const parts = base
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean);
     let cleaned = base;
 
     if (parts.length >= 3) {
@@ -543,8 +580,8 @@ function normalizePinterestTitle(rawTitle, fallback = 'Pinterest') {
     }
 
     cleaned = cleaned
-        .replace(/^Image\s*\d+\s*:\s*/i, '')
-        .replace(/^[-:|]+\s*/, '')
+        .replace(/^Image\s*\d+\s*:\s*/i, "")
+        .replace(/^[-:|]+\s*/, "")
         .trim();
 
     if (!cleaned || cleaned.length < 3) {
@@ -568,19 +605,14 @@ function buildPinterestSearchResultsFromMetadata(query, metadata, maxItems) {
         if (!entry) continue;
 
         const sourceUrl =
-            entry.webpage_url ||
-            entry.original_url ||
-            entry.url ||
-            null;
+            entry.webpage_url || entry.original_url || entry.url || null;
 
         const thumbnailFromArray = Array.isArray(entry.thumbnails)
             ? entry.thumbnails.map((item) => item?.url).find(Boolean)
             : null;
 
         const mediaUrl = normalizePinterestMediaUrl(
-            entry.thumbnail ||
-            thumbnailFromArray ||
-            entry.url
+            entry.thumbnail || thumbnailFromArray || entry.url,
         );
 
         if (!mediaUrl || !sourceUrl) continue;
@@ -593,7 +625,7 @@ function buildPinterestSearchResultsFromMetadata(query, metadata, maxItems) {
             title: String(entry.title || `${query} ${results.length + 1}`).trim(),
             sourceUrl,
             mediaUrl,
-            mediaType: resolvePinterestMediaType(mediaUrl)
+            mediaType: resolvePinterestMediaType(mediaUrl),
         });
 
         if (results.length >= maxItems) {
@@ -604,9 +636,15 @@ function buildPinterestSearchResultsFromMetadata(query, metadata, maxItems) {
     return results;
 }
 
-function buildPinterestFallbackResultsFromHtml(query, searchUrl, html, maxItems) {
-    const imageRegex = /https:\/\/i\.pinimg\.com\/[^"'\s)]+\.(?:jpe?g|png|webp)(?:\?[^"'\s)]*)?/gi;
-    const rawMatches = String(html || '').match(imageRegex) || [];
+function buildPinterestFallbackResultsFromHtml(
+    query,
+    searchUrl,
+    html,
+    maxItems,
+) {
+    const imageRegex =
+        /https:\/\/i\.pinimg\.com\/[^"'\s)]+\.(?:jpe?g|png|webp)(?:\?[^"'\s)]*)?/gi;
+    const rawMatches = String(html || "").match(imageRegex) || [];
 
     const unique = [];
     const seen = new Set();
@@ -624,19 +662,19 @@ function buildPinterestFallbackResultsFromHtml(query, searchUrl, html, maxItems)
         title: `${query} ${index + 1}`,
         sourceUrl: searchUrl,
         mediaUrl,
-        mediaType: 'image'
+        mediaType: "image",
     }));
 }
 
 function parseDuckDuckGoRedirect(rawUrl) {
-    const value = String(rawUrl || '');
-    const marker = 'uddg=';
+    const value = String(rawUrl || "");
+    const marker = "uddg=";
     const markerIndex = value.indexOf(marker);
     if (markerIndex === -1) {
         return null;
     }
 
-    const encoded = value.slice(markerIndex + marker.length).split('&')[0];
+    const encoded = value.slice(markerIndex + marker.length).split("&")[0];
     if (!encoded) {
         return null;
     }
@@ -649,7 +687,7 @@ function parseDuckDuckGoRedirect(rawUrl) {
 }
 
 function normalizePinterestPinUrl(url) {
-    const value = String(url || '').trim();
+    const value = String(url || "").trim();
     if (!value) {
         return null;
     }
@@ -657,7 +695,7 @@ function normalizePinterestPinUrl(url) {
     try {
         const parsed = new URL(value);
         const host = parsed.hostname.toLowerCase();
-        if (!host.endsWith('pinterest.com')) {
+        if (!host.endsWith("pinterest.com")) {
             return null;
         }
 
@@ -685,17 +723,17 @@ async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
         }
 
         const searchUrl = `https://duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}&s=${offset}`;
-        let html = '';
+        let html = "";
 
         try {
             const response = await fetch(searchUrl, {
                 headers: {
-                    'user-agent':
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                    accept: 'text/html,application/xhtml+xml',
-                    cookie: String(PINTEREST_COOKIES || '')
+                    "user-agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    accept: "text/html,application/xhtml+xml",
+                    cookie: String(PINTEREST_COOKIES || ""),
                 },
-                signal: AbortSignal.timeout(20000)
+                signal: AbortSignal.timeout(20000),
             });
 
             if (!response.ok) {
@@ -707,19 +745,23 @@ async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
                 continue;
             }
         } catch (error) {
-            console.warn('[Pinterest DuckDuckGo] Fetch error:', error.message);
+            console.warn("[Pinterest DuckDuckGo] Fetch error:", error.message);
             continue;
         }
 
         const rawCandidates = [
-            ...[...String(html).matchAll(/uddg=([^&"'\s<>]+)/gi)].map((item) => {
-                try {
-                    return decodeURIComponent(item[1]);
-                } catch {
-                    return null;
-                }
-            }).filter(Boolean),
-            ...[...String(html).matchAll(/https?:\/\/[^"'\s<>]+/gi)].map((item) => item[0])
+            ...[...String(html).matchAll(/uddg=([^&"'\s<>]+)/gi)]
+                .map((item) => {
+                    try {
+                        return decodeURIComponent(item[1]);
+                    } catch {
+                        return null;
+                    }
+                })
+                .filter(Boolean),
+            ...[...String(html).matchAll(/https?:\/\/[^"'\s<>]+/gi)].map(
+                (item) => item[0],
+            ),
         ];
 
         for (const rawLink of rawCandidates) {
@@ -745,18 +787,24 @@ async function searchPinterestPinUrlsByDuckDuckGo(query, maxItems) {
     }
 
     if (found.length > 0) {
-        console.log(`[Pinterest DuckDuckGo] ✅ Encontrados ${found.length} resultados`);
+        console.log(
+            `[Pinterest DuckDuckGo] ✅ Encontrados ${found.length} resultados`,
+        );
     } else {
-        console.warn('[Pinterest DuckDuckGo] ⚠️ No se encontraron resultados');
+        console.warn("[Pinterest DuckDuckGo] ⚠️ No se encontraron resultados");
     }
 
     return found;
 }
 
 function extractPinterestCandidatesFromText(text, maxItems) {
-    const rawText = String(text || '');
-    const cleaned = rawText.replace(/\\\//g, '/');
-    const structuredMatches = [...cleaned.matchAll(/\[!\[Image\s+\d+:\s*([^\]]+)\]\((https?:\/\/i\.pinimg\.com\/[^)\s]+)\)\]\((https?:\/\/(?:www\.|[a-z]{2}\.)?pinterest\.com\/pin\/[^)\s]+)\)/gi)];
+    const rawText = String(text || "");
+    const cleaned = rawText.replace(/\\\//g, "/");
+    const structuredMatches = [
+        ...cleaned.matchAll(
+            /\[!\[Image\s+\d+:\s*([^\]]+)\]\((https?:\/\/i\.pinimg\.com\/[^)\s]+)\)\]\((https?:\/\/(?:www\.|[a-z]{2}\.)?pinterest\.com\/pin\/[^)\s]+)\)/gi,
+        ),
+    ];
 
     const structuredCandidates = [];
     const structuredSeen = new Set();
@@ -777,7 +825,7 @@ function extractPinterestCandidatesFromText(text, maxItems) {
         structuredCandidates.push({
             sourceUrl,
             mediaUrl,
-            title: title || null
+            title: title || null,
         });
 
         if (structuredCandidates.length >= maxItems) {
@@ -785,25 +833,37 @@ function extractPinterestCandidatesFromText(text, maxItems) {
         }
     }
 
-    const pinUrls = [...new Set(
-        (rawText.match(/https?:\/\/(?:www\.|[a-z]{2}\.)?pinterest\.com\/pin\/[^\s"')]+/gi) || [])
-            .map((url) => normalizePinterestPinUrl(url))
-            .filter(Boolean)
-    )];
+    const pinUrls = [
+        ...new Set(
+            (
+                rawText.match(
+                    /https?:\/\/(?:www\.|[a-z]{2}\.)?pinterest\.com\/pin\/[^\s"')]+/gi,
+                ) || []
+            )
+                .map((url) => normalizePinterestPinUrl(url))
+                .filter(Boolean),
+        ),
+    ];
 
-    const mediaUrls = [...new Set(
-        (rawText.match(/https?:\/\/i\.pinimg\.com\/[^\s"')]+/gi) || [])
-            .map((url) => normalizePinterestMediaUrl(url))
-            .filter(Boolean)
-    )];
+    const mediaUrls = [
+        ...new Set(
+            (rawText.match(/https?:\/\/i\.pinimg\.com\/[^\s"')]+/gi) || [])
+                .map((url) => normalizePinterestMediaUrl(url))
+                .filter(Boolean),
+        ),
+    ];
 
     const limit = Math.max(1, maxItems);
     const candidates = [];
-    for (let index = 0; index < pinUrls.length && candidates.length < limit; index += 1) {
+    for (
+        let index = 0;
+        index < pinUrls.length && candidates.length < limit;
+        index += 1
+    ) {
         candidates.push({
             sourceUrl: pinUrls[index],
             mediaUrl: mediaUrls[index] || null,
-            title: null
+            title: null,
         });
     }
 
@@ -812,10 +872,12 @@ function extractPinterestCandidatesFromText(text, maxItems) {
 
 async function searchPinterestCandidatesByJina(query, maxItems) {
     const searchUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}`;
-    const proxyUrl = `https://r.jina.ai/http://${searchUrl.replace(/^https?:\/\//, '')}`;
+    const proxyUrl = `https://r.jina.ai/http://${searchUrl.replace(/^https?:\/\//, "")}`;
 
     try {
-        console.log(`[Pinterest Jina] Intentando petición directa: ${searchUrl.substring(0, 80)}...`);
+        console.log(
+            `[Pinterest Jina] Intentando petición directa: ${searchUrl.substring(0, 80)}...`,
+        );
 
         // Intento con Puppeteer (si está instalado) para sortear bloqueos y obtener contenido renderizado
         try {
@@ -824,39 +886,46 @@ async function searchPinterestCandidatesByJina(query, maxItems) {
                 return pp.map((item) => ({
                     sourceUrl: item.sourceUrl,
                     mediaUrl: item.mediaUrl,
-                    title: item.title || null
+                    title: item.title || null,
                 }));
             }
         } catch (e) {
-            console.warn('[Pinterest Jina] Puppeteer fallback error:', e?.message || e);
+            console.warn(
+                "[Pinterest Jina] Puppeteer fallback error:",
+                e?.message || e,
+            );
         }
 
         // Intento directo con cookies (mejor chance si la sesión es válida)
         let response = await fetch(searchUrl, {
             headers: {
-                'user-agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                accept: 'text/html,application/xhtml+xml',
-                cookie: String(PINTEREST_COOKIES || '')
+                "user-agent":
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                accept: "text/html,application/xhtml+xml",
+                cookie: String(PINTEREST_COOKIES || ""),
             },
-            signal: AbortSignal.timeout(25000)
+            signal: AbortSignal.timeout(25000),
         });
 
         let content = null;
 
         if (response.ok) {
             content = await response.text();
-            console.log(`[Pinterest Jina] Directo: recibido ${String(content?.length || 0)} bytes`);
+            console.log(
+                `[Pinterest Jina] Directo: recibido ${String(content?.length || 0)} bytes`,
+            );
         } else {
-            console.warn(`[Pinterest Jina] Directo HTTP ${response.status}, intentando proxy jina.ai`);
+            console.warn(
+                `[Pinterest Jina] Directo HTTP ${response.status}, intentando proxy jina.ai`,
+            );
             // Fallback al proxy jina.ai
             response = await fetch(proxyUrl, {
                 headers: {
-                    'user-agent':
-                        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                    accept: 'text/plain, text/markdown'
+                    "user-agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    accept: "text/plain, text/markdown",
                 },
-                signal: AbortSignal.timeout(25000)
+                signal: AbortSignal.timeout(25000),
             });
 
             if (!response.ok) {
@@ -865,85 +934,109 @@ async function searchPinterestCandidatesByJina(query, maxItems) {
             }
 
             content = await response.text();
-            console.log(`[Pinterest Jina] Proxy: recibido ${String(content?.length || 0)} bytes`);
+            console.log(
+                `[Pinterest Jina] Proxy: recibido ${String(content?.length || 0)} bytes`,
+            );
         }
 
         if (!content || content.length < 100) {
-            console.warn(`[Pinterest Jina] Contenido muy pequeño (${content?.length || 0} bytes)`);
+            console.warn(
+                `[Pinterest Jina] Contenido muy pequeño (${content?.length || 0} bytes)`,
+            );
             return [];
         }
 
         const extracted = extractPinterestCandidatesFromText(content, maxItems);
         if (extracted.length === 0) {
-            console.warn('[Pinterest Jina] No se extrajeron URLs del contenido');
+            console.warn("[Pinterest Jina] No se extrajeron URLs del contenido");
         }
         return extracted;
     } catch (error) {
-        console.warn('[Pinterest Jina] Error:', error.message);
+        console.warn("[Pinterest Jina] Error:", error.message);
         return [];
     }
 }
 
 function inferExtensionFromContentType(contentType) {
-    const value = String(contentType || '').toLowerCase();
-    if (value.includes('jpeg') || value.includes('jpg')) return '.jpg';
-    if (value.includes('png')) return '.png';
-    if (value.includes('webp')) return '.webp';
-    if (value.includes('gif')) return '.gif';
-    if (value.includes('mp4')) return '.mp4';
-    if (value.includes('webm')) return '.webm';
-    if (value.includes('quicktime')) return '.mov';
-    return '';
+    const value = String(contentType || "").toLowerCase();
+    if (value.includes("jpeg") || value.includes("jpg")) return ".jpg";
+    if (value.includes("png")) return ".png";
+    if (value.includes("webp")) return ".webp";
+    if (value.includes("gif")) return ".gif";
+    if (value.includes("mp4")) return ".mp4";
+    if (value.includes("webm")) return ".webm";
+    if (value.includes("quicktime")) return ".mov";
+    return "";
 }
 
-async function saveRemoteMediaToTemp(url, prefix, preferredTitle = 'pinterest') {
+async function saveRemoteMediaToTemp(
+    url,
+    prefix,
+    preferredTitle = "pinterest",
+) {
     const response = await fetch(url, {
         headers: {
-            'user-agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            accept: '*/*'
+            "user-agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            accept: "*/*",
         },
-        signal: AbortSignal.timeout(20000)
+        signal: AbortSignal.timeout(20000),
     });
 
     if (!response.ok) {
-        throw new Error(`No se pudo descargar media de Pinterest (${response.status}).`);
+        throw new Error(
+            `No se pudo descargar media de Pinterest (${response.status}).`,
+        );
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    const contentType = response.headers.get('content-type') || '';
+    const contentType = response.headers.get("content-type") || "";
     const extensionFromType = inferExtensionFromContentType(contentType);
-    const extensionFromUrl = path.extname(normalizePinterestMediaUrl(url) || '').toLowerCase();
-    const extension = extensionFromType || extensionFromUrl || '.jpg';
+    const extensionFromUrl = path
+        .extname(normalizePinterestMediaUrl(url) || "")
+        .toLowerCase();
+    const extension = extensionFromType || extensionFromUrl || ".jpg";
 
-    const safeBaseName = sanitizeFileName(preferredTitle, 'pinterest');
-    const outputPath = await buildUniqueFilePath(paths.tempDir, `${prefix}-${safeBaseName}`, extension);
+    const safeBaseName = sanitizeFileName(preferredTitle, "pinterest");
+    const outputPath = await buildUniqueFilePath(
+        paths.tempDir,
+        `${prefix}-${safeBaseName}`,
+        extension,
+    );
     await fs.writeFile(outputPath, buffer);
     return outputPath;
 }
 
 async function normalizePinterestDownloadForWhatsApp(inputPath, prefix) {
-    const extension = path.extname(String(inputPath || '').toLowerCase());
-    const isVideo = ['.mp4', '.webm', '.mkv', '.mov', '.m4v', '.avi', '.gif'].includes(extension);
+    const extension = path.extname(String(inputPath || "").toLowerCase());
+    const isVideo = [
+        ".mp4",
+        ".webm",
+        ".mkv",
+        ".mov",
+        ".m4v",
+        ".avi",
+        ".gif",
+    ].includes(extension);
 
     if (isVideo) {
         const outputPath = await convertToWhatsAppVideo(inputPath, prefix);
-        return { filePath: outputPath, mediaType: 'video' };
+        return { filePath: outputPath, mediaType: "video" };
     }
 
-    const isNativeCompatibleImage = ['.jpg', '.jpeg', '.png'].includes(extension);
+    const isNativeCompatibleImage = [".jpg", ".jpeg", ".png"].includes(extension);
     if (isNativeCompatibleImage) {
-        return { filePath: inputPath, mediaType: 'image' };
+        return { filePath: inputPath, mediaType: "image" };
     }
 
     const convertedImage = await convertImageToJpg(inputPath, prefix);
-    return { filePath: convertedImage, mediaType: 'image' };
+    return { filePath: convertedImage, mediaType: "image" };
 }
 
 async function searchPinterestMedia(query, limit = 3) {
-    const searchQuery = String(query || '').trim();
+    const searchQuery = String(query || "").trim();
     if (!searchQuery) {
-        throw new Error('Debes indicar un termino para Pinterest.');
+        throw new Error("Debes indicar un termino para Pinterest.");
     }
 
     const safeLimit = Math.max(1, Math.min(15, Number(limit) || 3));
@@ -953,10 +1046,12 @@ async function searchPinterestMedia(query, limit = 3) {
 
     const [preferredCandidates, fallbackPinUrls] = await Promise.all([
         searchPinterestCandidatesByJina(searchQuery, poolSize),
-        searchPinterestPinUrlsByDuckDuckGo(searchQuery, poolSize)
+        searchPinterestPinUrlsByDuckDuckGo(searchQuery, poolSize),
     ]);
 
-    console.log(`[Pinterest] Jina: ${preferredCandidates.length}, DuckDuckGo: ${fallbackPinUrls.length}`);
+    console.log(
+        `[Pinterest] Jina: ${preferredCandidates.length}, DuckDuckGo: ${fallbackPinUrls.length}`,
+    );
 
     // Merge sources to avoid being stuck with the same first Pinterest rows.
     const mergedCandidates = [
@@ -964,14 +1059,14 @@ async function searchPinterestMedia(query, limit = 3) {
         ...fallbackPinUrls.map((pinUrl) => ({
             sourceUrl: pinUrl,
             mediaUrl: null,
-            title: null
-        }))
+            title: null,
+        })),
     ];
 
     const uniqueCandidates = [];
     const seenSourceUrls = new Set();
     for (const item of mergedCandidates) {
-        const sourceUrl = String(item?.sourceUrl || '').trim();
+        const sourceUrl = String(item?.sourceUrl || "").trim();
         if (!sourceUrl || seenSourceUrls.has(sourceUrl)) {
             continue;
         }
@@ -988,13 +1083,16 @@ async function searchPinterestMedia(query, limit = 3) {
             break;
         }
 
-        const pinUrl = String(candidate?.sourceUrl || '').trim();
+        const pinUrl = String(candidate?.sourceUrl || "").trim();
         if (!pinUrl) {
             continue;
         }
 
         let mediaUrl = normalizePinterestMediaUrl(candidate?.mediaUrl);
-        let resolvedTitle = normalizePinterestTitle(candidate?.title, `${searchQuery} ${baseResults.length + 1}`);
+        let resolvedTitle = normalizePinterestTitle(
+            candidate?.title,
+            `${searchQuery} ${baseResults.length + 1}`,
+        );
 
         if (!mediaUrl) {
             const metadata = await getYtDlpInfoSafe(pinUrl);
@@ -1002,8 +1100,13 @@ async function searchPinterestMedia(query, limit = 3) {
                 ? metadata.thumbnails.map((item) => item?.url).find(Boolean)
                 : null;
 
-            mediaUrl = normalizePinterestMediaUrl(metadata?.thumbnail || thumbnailFromArray);
-            resolvedTitle = normalizePinterestTitle(metadata?.title || resolvedTitle, resolvedTitle);
+            mediaUrl = normalizePinterestMediaUrl(
+                metadata?.thumbnail || thumbnailFromArray,
+            );
+            resolvedTitle = normalizePinterestTitle(
+                metadata?.title || resolvedTitle,
+                resolvedTitle,
+            );
         }
 
         if (!mediaUrl || seenMediaUrls.has(mediaUrl)) {
@@ -1015,26 +1118,32 @@ async function searchPinterestMedia(query, limit = 3) {
             title: resolvedTitle,
             sourceUrl: pinUrl,
             mediaUrl,
-            mediaType: 'image'
+            mediaType: "image",
         });
     }
 
-    const finalResults = pickPinterestResults(searchQuery, baseResults, safeLimit);
-    console.log(`[Pinterest] Resultados finales: ${finalResults.length}/${safeLimit}`);
+    const finalResults = pickPinterestResults(
+        searchQuery,
+        baseResults,
+        safeLimit,
+    );
+    console.log(
+        `[Pinterest] Resultados finales: ${finalResults.length}/${safeLimit}`,
+    );
 
     if (finalResults.length === 0) {
-        console.warn('[Pinterest] ⚠️ Sin resultados encontrados');
+        console.warn("[Pinterest] ⚠️ Sin resultados encontrados");
     }
 
     return finalResults;
 }
 
-async function downloadPinterestMedia(url, preferredTitle = 'Pinterest') {
+async function downloadPinterestMedia(url, preferredTitle = "Pinterest") {
     await ensureTempDir();
 
-    const sourceUrl = String(url || '').trim();
+    const sourceUrl = String(url || "").trim();
     if (!sourceUrl) {
-        throw new Error('Debes indicar una URL de Pinterest.');
+        throw new Error("Debes indicar una URL de Pinterest.");
     }
 
     const id = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
@@ -1047,73 +1156,84 @@ async function downloadPinterestMedia(url, preferredTitle = 'Pinterest') {
     try {
         await ytDlp.execPromise([
             sourceUrl,
-            '-o',
+            "-o",
             outputTemplate,
-            '--no-playlist',
-            '--no-warnings',
-            '--no-check-certificates',
-            '--retries',
-            '2',
-            '--max-filesize',
-            `${limits.maxFileSizeMb}M`
+            "--no-playlist",
+            "--no-warnings",
+            "--no-check-certificates",
+            "--retries",
+            "2",
+            "--max-filesize",
+            `${limits.maxFileSizeMb}M`,
         ]);
 
         downloadedPath = await findDownloadedFile(id, [
-            '.mp4',
-            '.webm',
-            '.mkv',
-            '.mov',
-            '.m4v',
-            '.avi',
-            '.gif',
-            '.jpg',
-            '.jpeg',
-            '.png',
-            '.webp'
+            ".mp4",
+            ".webm",
+            ".mkv",
+            ".mov",
+            ".m4v",
+            ".avi",
+            ".gif",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
         ]);
     } catch {
         const thumbnailUrl = normalizePinterestMediaUrl(
             metadata?.thumbnail ||
-            (Array.isArray(metadata?.thumbnails) ? metadata.thumbnails.map((item) => item?.url).find(Boolean) : null) ||
-            sourceUrl
+            (Array.isArray(metadata?.thumbnails)
+                ? metadata.thumbnails.map((item) => item?.url).find(Boolean)
+                : null) ||
+            sourceUrl,
         );
 
         if (!thumbnailUrl) {
-            throw new Error('No se pudo descargar el contenido de Pinterest.');
+            throw new Error("No se pudo descargar el contenido de Pinterest.");
         }
 
-        downloadedPath = await saveRemoteMediaToTemp(thumbnailUrl, id, preferredTitle);
+        downloadedPath = await saveRemoteMediaToTemp(
+            thumbnailUrl,
+            id,
+            preferredTitle,
+        );
     }
 
-    const normalized = await normalizePinterestDownloadForWhatsApp(downloadedPath, id);
+    const normalized = await normalizePinterestDownloadForWhatsApp(
+        downloadedPath,
+        id,
+    );
     const stats = await fs.stat(normalized.filePath);
     if (stats.size > limits.maxFileSizeBytes) {
         await safeCleanup(normalized.filePath);
-        throw new Error(`El archivo supera el limite de ${limits.maxFileSizeMb}MB.`);
+        throw new Error(
+            `El archivo supera el limite de ${limits.maxFileSizeMb}MB.`,
+        );
     }
 
     const title = normalizePinterestTitle(
         metadata?.title || preferredTitle,
-        sanitizeFileName(preferredTitle, 'Pinterest media')
+        sanitizeFileName(preferredTitle, "Pinterest media"),
     );
 
     return {
         filePath: normalized.filePath,
         title,
         mediaType: normalized.mediaType,
-        sourceUrl
+        sourceUrl,
     };
 }
 
 async function downloadPinterestSearchItem(item) {
     const entry = item || {};
-    const sourceUrl = String(entry.sourceUrl || '').trim();
-    const mediaUrl = String(entry.mediaUrl || '').trim();
-    const title = normalizePinterestTitle(entry.title, 'Pinterest');
+    const sourceUrl = String(entry.sourceUrl || "").trim();
+    const mediaUrl = String(entry.mediaUrl || "").trim();
+    const title = normalizePinterestTitle(entry.title, "Pinterest");
 
     if (!mediaUrl) {
         if (!sourceUrl) {
-            throw new Error('Resultado de Pinterest sin URL de media.');
+            throw new Error("Resultado de Pinterest sin URL de media.");
         }
 
         return downloadPinterestMedia(sourceUrl, title);
@@ -1127,7 +1247,9 @@ async function downloadPinterestSearchItem(item) {
     const stats = await fs.stat(normalized.filePath);
     if (stats.size > limits.maxFileSizeBytes) {
         await safeCleanup(normalized.filePath);
-        throw new Error(`El archivo supera el limite de ${limits.maxFileSizeMb}MB.`);
+        throw new Error(
+            `El archivo supera el limite de ${limits.maxFileSizeMb}MB.`,
+        );
     }
 
     return {
@@ -1135,7 +1257,7 @@ async function downloadPinterestSearchItem(item) {
         title,
         mediaType: normalized.mediaType,
         sourceUrl,
-        mediaUrl
+        mediaUrl,
     };
 }
 
@@ -1148,95 +1270,116 @@ async function downloadVideo(url) {
     let metadata = null;
     metadata = await getYtDlpInfoSafe(url);
 
-
     const isTikTok = /tiktok\.com/i.test(url);
     const useBrowserCookies = performance.useBrowserCookies && isTikTok;
 
     const baseArgs = [
         url,
-        '-o',
+        "-o",
         outputTemplate,
-        '--no-playlist',
-        '--no-warnings',
-        '--no-check-certificates',
-        '--concurrent-fragments',
+        "--no-playlist",
+        "--no-warnings",
+        "--no-check-certificates",
+        "--concurrent-fragments",
         String(performance.downloadConcurrentFragments),
-        '--retries',
+        "--retries",
         String(performance.downloadRetries),
-        '--fragment-retries',
+        "--fragment-retries",
         String(performance.downloadRetries),
-        '--socket-timeout',
-        '30',
-        '--skip-unavailable-fragments',
-        '--max-filesize',
-        `${limits.maxFileSizeMb}M`
+        "--socket-timeout",
+        "30",
+        "--skip-unavailable-fragments",
+        "--max-filesize",
+        `${limits.maxFileSizeMb}M`,
     ];
 
     // Add headers and cookies for TikTok to bypass 403 restrictions
     if (isTikTok) {
-        baseArgs.push('--add-header', 'Referer:https://www.tiktok.com/');
-        baseArgs.push('--add-header', 'Origin:https://www.tiktok.com');
-        baseArgs.push('--add-header', 'Accept-Language:es-ES,es;q=0.9,en;q=0.8');
-        baseArgs.push('--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        baseArgs.push('--impersonate', 'chrome');
-        baseArgs.push('--concurrent-fragments', '1');
+        baseArgs.push("--add-header", "Referer:https://www.tiktok.com/");
+        baseArgs.push("--add-header", "Origin:https://www.tiktok.com");
+        baseArgs.push("--add-header", "Accept-Language:es-ES,es;q=0.9,en;q=0.8");
+        baseArgs.push(
+            "--add-header",
+            "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        );
+        baseArgs.push("--impersonate", "chrome");
+        baseArgs.push("--concurrent-fragments", "1");
         // Avoid TikTok rate limits (HTTP 429)
-        baseArgs.push('--sleep-interval', '4');
-        baseArgs.push('--max-sleep-interval', '8');
-        baseArgs.push('--retry-sleep', '10');
+        baseArgs.push("--sleep-interval", "3");
+        baseArgs.push("--max-sleep-interval", "4");
+        baseArgs.push("--retry-sleep", "10");
         if (performance.tikTokProxyUrl) {
-            baseArgs.push('--proxy', performance.tikTokProxyUrl);
+            baseArgs.push("--proxy", performance.tikTokProxyUrl);
         }
         if (performance.tikTokCookiesFile) {
-            baseArgs.push('--cookies', performance.tikTokCookiesFile);
+            baseArgs.push("--cookies", performance.tikTokCookiesFile);
         } else if (useBrowserCookies) {
-            baseArgs.push('--cookies-from-browser', performance.browserForCookies);
+            baseArgs.push("--cookies-from-browser", performance.browserForCookies);
         }
     }
 
     // Add speed limit if configured
     if (performance.downloadSpeedLimit > 0) {
-        baseArgs.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
+        baseArgs.push(
+            "--limit-rate",
+            `${Math.floor(performance.downloadSpeedLimit / 1024)}k`,
+        );
     }
 
     const formatCandidates = isTikTok
-        ? [
-            'bestvideo+bestaudio/best',
-            'best'
-        ]
+        ? ["bestvideo+bestaudio/best", "best"]
         : [
-            'best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]',
-            'best[ext=mp4]/best'
+            "best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]",
+            "best[ext=mp4]/best",
         ];
 
     let lastError = null;
     for (let index = 0; index < formatCandidates.length; index += 1) {
         const format = formatCandidates[index];
         try {
-            await ytDlp.execPromise([...baseArgs, '-f', format]);
+            await new Promise((resolve, reject) => {
+                ytDlp
+                    .exec([...baseArgs, "-f", format])
+                    .on("ytDlpEvent", (eventType, eventData) => {
+                        if (eventType === "download") {
+                            process.stdout.write(`\r⏬ ${eventData}`);
+                        }
+                    })
+                    .on("error", reject)
+                    .on("close", resolve);
+            });
+            console.log(); // salto de línea al terminar
             lastError = null;
             break;
         } catch (error) {
             lastError = error;
-            const message = String(error?.stderr || error?.message || '');
-            
+            const message = String(error?.stderr || error?.message || "");
+
             // If TikTok download fails with browser cookies, retry without them
-            if (useBrowserCookies && /tiktok|403|authorization|cookie/i.test(message)) {
-                console.log('TikTok descarga falló con cookies del navegador, reintentando sin ellas...');
+            if (
+                useBrowserCookies &&
+                /tiktok|403|authorization|cookie/i.test(message)
+            ) {
+                console.log(
+                    "TikTok descarga falló con cookies del navegador, reintentando sin ellas...",
+                );
                 // Remove cookies args and retry
                 const argsWithoutCookies = baseArgs.filter((arg, idx, arr) => {
-                    return !(arg === '--cookies-from-browser' || (idx > 0 && arr[idx - 1] === '--cookies-from-browser'));
+                    return !(
+                        arg === "--cookies-from-browser" ||
+                        (idx > 0 && arr[idx - 1] === "--cookies-from-browser")
+                    );
                 });
-                
+
                 try {
-                    await ytDlp.execPromise([...argsWithoutCookies, '-f', format]);
+                    await ytDlp.execPromise([...argsWithoutCookies, "-f", format]);
                     lastError = null;
                     break;
                 } catch (retryError) {
                     lastError = retryError;
                 }
             }
-            
+
             const canRetry = /requested format is not available/i.test(message);
             const isLastCandidate = index === formatCandidates.length - 1;
             if (!canRetry || isLastCandidate) {
@@ -1249,23 +1392,32 @@ async function downloadVideo(url) {
         throw lastError;
     }
 
-    const downloadedPath = await findDownloadedFile(id, ['.mp4', '.webm', '.mkv', '.mov', '.m4v', '.avi']);
+    const downloadedPath = await findDownloadedFile(id, [
+        ".mp4",
+        ".webm",
+        ".mkv",
+        ".mov",
+        ".m4v",
+        ".avi",
+    ]);
     const filePath = await convertToWhatsAppVideo(downloadedPath, id);
     const stats = await fs.stat(filePath);
 
     if (stats.size > limits.maxFileSizeBytes) {
         await safeCleanup(filePath);
-        throw new Error(`El archivo supera el límite de ${limits.maxFileSizeMb}MB.`);
+        throw new Error(
+            `El archivo supera el límite de ${limits.maxFileSizeMb}MB.`,
+        );
     }
 
-    const title = metadata?.title || 'Video descargado';
+    const title = metadata?.title || "Video descargado";
     return { filePath, title };
 }
 
 async function searchVideosByTitle(query, limit = 3) {
-    const searchQuery = String(query || '').trim();
+    const searchQuery = String(query || "").trim();
     if (!searchQuery) {
-        throw new Error('Debes indicar un titulo para buscar.');
+        throw new Error("Debes indicar un titulo para buscar.");
     }
 
     const safeLimit = Math.max(1, Math.min(10, Number(limit) || 3));
@@ -1285,11 +1437,12 @@ async function searchVideosByTitle(query, limit = 3) {
             .filter((entry) => entry && (entry.webpage_url || entry.url))
             .slice(0, safeLimit)
             .map((entry) => ({
-                title: entry.title || 'Sin titulo',
-                author: entry.uploader || entry.channel || entry.creator || 'Desconocido',
+                title: entry.title || "Sin titulo",
+                author:
+                    entry.uploader || entry.channel || entry.creator || "Desconocido",
                 publishedAt: resolvePublishedDate(entry),
                 sizeMb: resolveVideoSizeMb(entry),
-                sourceUrl: entry.webpage_url || entry.url
+                sourceUrl: entry.webpage_url || entry.url,
             }));
     } catch {
         results = [];
@@ -1302,13 +1455,13 @@ async function searchVideosByTitle(query, limit = 3) {
     // Fallback: parse one JSON object per line from yt-dlp search output.
     const rawJsonLines = await ytDlp.execPromise([
         searchInput,
-        '--skip-download',
-        '--dump-json',
-        '--no-warnings',
-        '--no-playlist'
+        "--skip-download",
+        "--dump-json",
+        "--no-warnings",
+        "--no-playlist",
     ]);
 
-    const parsedResults = String(rawJsonLines || '')
+    const parsedResults = String(rawJsonLines || "")
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean)
@@ -1316,11 +1469,12 @@ async function searchVideosByTitle(query, limit = 3) {
             try {
                 const item = JSON.parse(line);
                 return {
-                    title: item?.title || 'Sin titulo',
-                    author: item?.uploader || item?.channel || item?.creator || 'Desconocido',
+                    title: item?.title || "Sin titulo",
+                    author:
+                        item?.uploader || item?.channel || item?.creator || "Desconocido",
                     publishedAt: resolvePublishedDate(item),
                     sizeMb: resolveVideoSizeMb(item),
-                    sourceUrl: item?.webpage_url || item?.url || null
+                    sourceUrl: item?.webpage_url || item?.url || null,
                 };
             } catch {
                 return null;
@@ -1333,9 +1487,9 @@ async function searchVideosByTitle(query, limit = 3) {
 }
 
 async function downloadVideoBySearch(query) {
-    const searchQuery = String(query || '').trim();
+    const searchQuery = String(query || "").trim();
     if (!searchQuery) {
-        throw new Error('Debes indicar un titulo para buscar.');
+        throw new Error("Debes indicar un titulo para buscar.");
     }
 
     await ensureTempDir();
@@ -1353,44 +1507,47 @@ async function downloadVideoBySearch(query) {
 
     const baseArgs = [
         searchInput,
-        '-o',
+        "-o",
         outputTemplate,
-        '--no-playlist',
-        '--no-warnings',
-        '--no-check-certificates',
-        '--concurrent-fragments',
+        "--no-playlist",
+        "--no-warnings",
+        "--no-check-certificates",
+        "--concurrent-fragments",
         String(performance.downloadConcurrentFragments),
-        '--retries',
+        "--retries",
         String(performance.downloadRetries),
-        '--fragment-retries',
+        "--fragment-retries",
         String(performance.downloadRetries),
-        '--socket-timeout',
-        '30',
-        '--skip-unavailable-fragments',
-        '--max-filesize',
-        `${limits.maxFileSizeMb}M`
+        "--socket-timeout",
+        "30",
+        "--skip-unavailable-fragments",
+        "--max-filesize",
+        `${limits.maxFileSizeMb}M`,
     ];
 
     // Add speed limit if configured
     if (performance.downloadSpeedLimit > 0) {
-        baseArgs.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
+        baseArgs.push(
+            "--limit-rate",
+            `${Math.floor(performance.downloadSpeedLimit / 1024)}k`,
+        );
     }
 
     const formatCandidates = [
-        'best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]',
-        'best[ext=mp4]/best'
+        "best[height<=720][ext=mp4][vcodec!=none][acodec!=none]/best[height<=720][ext=mp4]/best[height<=720][vcodec!=none][acodec!=none]/best[height<=720]",
+        "best[ext=mp4]/best",
     ];
 
     let lastError = null;
     for (let index = 0; index < formatCandidates.length; index += 1) {
         const format = formatCandidates[index];
         try {
-            await ytDlp.execPromise([...baseArgs, '-f', format]);
+            await ytDlp.execPromise([...baseArgs, "-f", format]);
             lastError = null;
             break;
         } catch (error) {
             lastError = error;
-            const message = String(error?.stderr || error?.message || '');
+            const message = String(error?.stderr || error?.message || "");
             const canRetry = /requested format is not available/i.test(message);
             const isLastCandidate = index === formatCandidates.length - 1;
             if (!canRetry || isLastCandidate) {
@@ -1403,25 +1560,33 @@ async function downloadVideoBySearch(query) {
         throw lastError;
     }
 
-    const downloadedPath = await findDownloadedFile(id, ['.mp4', '.webm', '.mkv', '.mov', '.m4v', '.avi']);
+    const downloadedPath = await findDownloadedFile(id, [
+        ".mp4",
+        ".webm",
+        ".mkv",
+        ".mov",
+        ".m4v",
+        ".avi",
+    ]);
     const filePath = await convertToWhatsAppVideo(downloadedPath, id);
     const stats = await fs.stat(filePath);
 
     if (stats.size > limits.maxFileSizeBytes) {
         await safeCleanup(filePath);
-        throw new Error(`El archivo supera el limite de ${limits.maxFileSizeMb}MB.`);
+        throw new Error(
+            `El archivo supera el limite de ${limits.maxFileSizeMb}MB.`,
+        );
     }
 
-    const bestEntry = Array.isArray(metadata?.entries) ? metadata.entries[0] : null;
+    const bestEntry = Array.isArray(metadata?.entries)
+        ? metadata.entries[0]
+        : null;
     const title =
         metadata?.title ||
         bestEntry?.title ||
         `Resultado de busqueda: ${searchQuery}`;
     const sourceUrl =
-        metadata?.webpage_url ||
-        bestEntry?.webpage_url ||
-        bestEntry?.url ||
-        null;
+        metadata?.webpage_url || bestEntry?.webpage_url || bestEntry?.url || null;
 
     return { filePath, title, sourceUrl };
 }
@@ -1441,53 +1606,73 @@ async function downloadAudio(url) {
 
     const args = [
         url,
-        '-o',
+        "-o",
         outputTemplate,
-        '--no-playlist',
-        '--no-warnings',
-        '--no-check-certificates',
-        '--extract-audio',
-        '--audio-format',
-        'mp3',
-        '--audio-quality',
-        '192',
-        '--retries',
+        "--no-playlist",
+        "--no-warnings",
+        "--no-check-certificates",
+        "--extract-audio",
+        "--audio-format",
+        "mp3",
+        "--audio-quality",
+        "192",
+        "--retries",
         String(performance.downloadRetries),
-        '--fragment-retries',
+        "--fragment-retries",
         String(performance.downloadRetries),
-        '--socket-timeout',
-        '30',
-        '--concurrent-fragments',
+        "--socket-timeout",
+        "30",
+        "--concurrent-fragments",
         String(performance.downloadConcurrentFragments),
-        '-f',
-        'bestaudio/best',
-        '--max-filesize',
-        `${limits.maxFileSizeMb}M`
+        "-f",
+        "bestaudio/best",
+        "--max-filesize",
+        `${limits.maxFileSizeMb}M`,
     ];
 
     // Add speed limit if configured
     if (performance.downloadSpeedLimit > 0) {
-        args.push('--limit-rate', `${Math.floor(performance.downloadSpeedLimit / 1024)}k`);
+        args.push(
+            "--limit-rate",
+            `${Math.floor(performance.downloadSpeedLimit / 1024)}k`,
+        );
     }
 
     await ytDlp.execPromise(args);
 
-    const sourcePath = await findDownloadedFile(id, ['.mp3', '.m4a', '.aac', '.opus', '.wav', '.ogg', '.webm', '.mp4']);
+    const sourcePath = await findDownloadedFile(id, [
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".opus",
+        ".wav",
+        ".ogg",
+        ".webm",
+        ".mp4",
+    ]);
     const initialPath = await convertToMp3(sourcePath, id);
     const thumbnailUrl =
         metadata?.thumbnail ||
-        (Array.isArray(metadata?.thumbnails) ? metadata.thumbnails.map((item) => item?.url).find(Boolean) : null);
+        (Array.isArray(metadata?.thumbnails)
+            ? metadata.thumbnails.map((item) => item?.url).find(Boolean)
+            : null);
     const pathWithCover = await embedMp3CoverArt(initialPath, thumbnailUrl, id);
     const stats = await fs.stat(pathWithCover);
 
     if (stats.size > limits.maxFileSizeBytes) {
         await safeCleanup(pathWithCover);
-        throw new Error(`El archivo supera el limite de ${limits.maxFileSizeMb}MB.`);
+        throw new Error(
+            `El archivo supera el limite de ${limits.maxFileSizeMb}MB.`,
+        );
     }
 
-    const title = metadata?.title || 'Audio descargado';
-    const safeBaseName = sanitizeFileName(title, 'audio');
-    const renamedPath = await buildUniqueFilePath(paths.tempDir, safeBaseName, '.mp3');
+    const title = metadata?.title || "Audio descargado";
+    const safeBaseName = sanitizeFileName(title, "audio");
+    const renamedPath = await buildUniqueFilePath(
+        paths.tempDir,
+        safeBaseName,
+        ".mp3",
+    );
 
     await fs.rename(pathWithCover, renamedPath);
 
@@ -1504,5 +1689,5 @@ module.exports = {
     searchPinterestMedia,
     downloadPinterestMedia,
     downloadPinterestSearchItem,
-    safeCleanup
+    safeCleanup,
 };
