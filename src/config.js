@@ -45,16 +45,16 @@ const limits = {
 };
 
 const performance = {
-    maxConcurrentDownloads: Math.max(1, Number(process.env.MAX_CONCURRENT_DOWNLOADS || 1)),
-    ffmpegMaxBufferMb: Math.max(1, Number(process.env.FFMPEG_MAX_BUFFER_MB || 4)),
+    maxConcurrentDownloads: Math.max(1, Number(process.env.MAX_CONCURRENT_DOWNLOADS || 4)),
+    ffmpegMaxBufferMb: Math.max(1, Number(process.env.FFMPEG_MAX_BUFFER_MB || 16)),
     // Timeout for ffmpeg operations in milliseconds (default: 5 minutes)
     ffmpegTimeoutMs: Math.max(30_000, Number(process.env.FFMPEG_TIMEOUT_MS || 5 * 60 * 1000)),
     // Download optimization: concurrent fragments (1-8, default 4)
-    downloadConcurrentFragments: Math.max(1, Math.min(8, Number(process.env.DOWNLOAD_CONCURRENT_FRAGMENTS || 4))),
+    downloadConcurrentFragments: Math.max(1, Math.min(8, Number(process.env.DOWNLOAD_CONCURRENT_FRAGMENTS || 8))),
     // Download retry count for failed chunks
     downloadRetries: Math.max(2, Number(process.env.DOWNLOAD_RETRIES || 5)),
     // Speed limit in bytes/sec (0 = no limit, default: 100KB/s)
-    downloadSpeedLimit: Math.max(0, Number(process.env.DOWNLOAD_SPEED_LIMIT || 102400)),
+    downloadSpeedLimit: Math.max(0, Number(process.env.DOWNLOAD_SPEED_LIMIT || 0)),
     // Timeout in seconds for videoInfo caching (default: 5 minutes)
     videoInfoCacheTtlSeconds: Math.max(60, Number(process.env.VIDEO_INFO_CACHE_TTL_SECONDS || 300)),
     // Use browser cookies for TikTok downloads (to bypass restrictions)
