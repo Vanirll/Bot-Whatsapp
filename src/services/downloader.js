@@ -1146,11 +1146,8 @@ async function downloadVideo(url) {
     const outputTemplate = path.join(paths.tempDir, `${id}.%(ext)s`);
 
     let metadata = null;
-    try {
-        metadata = await ytDlp.getVideoInfo(url);
-    } catch {
-        metadata = null;
-    }
+    metadata = await getYtDlpInfoSafe(url);
+
 
     const isTikTok = /tiktok\.com/i.test(url);
     const useBrowserCookies = performance.useBrowserCookies && isTikTok;
