@@ -1,4 +1,5 @@
 const qrcode = require('qrcode-terminal');
+const { once } = require('node:events');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
 const { paths } = require('./config');
@@ -62,17 +63,31 @@ async function startBot() {
     try {
         await acquireProcessLock();
         await ensureYtDlpBinary();
+
+        console.log('Iniciando cliente de WhatsApp...');
+
+        const readyPromise = once(client, 'ready');
+        const initPromise = client.initialize();
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('READY_TIMEOUT')), 120_000)
+        );
+
         await Promise.race([
-            client.initialize(),
-            new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('INIT_TIMEOUT')), 60_000)
-            )
+            initPromise.then(() => readyPromise),
+            readyPromise,
+            timeoutPromise,
         ]);
     } catch (err) {
-        if (String(err?.message || '').startsWith('BOT_ALREADY_RUNNING:')) {
+        const message = String(err?.message || '');
+
+        if (message.startsWith('BOT_ALREADY_RUNNING:')) {
             const pid = String(err.message).split(':')[1] || 'desconocido';
             console.error(`Ya hay otra instancia del bot ejecutándose (PID ${pid}). Cierra la anterior para ahorrar RAM.`);
             process.exit(1);
+        }
+
+        if (message === 'READY_TIMEOUT') {
+            console.error('El cliente de WhatsApp no llegó al estado ready dentro del tiempo esperado. Revisa si el navegador quedó bloqueado o si la sesión está corrupta.');
         }
 
         console.error('No se pudo iniciar el bot:', err);

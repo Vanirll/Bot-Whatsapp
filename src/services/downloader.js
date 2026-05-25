@@ -14,6 +14,135 @@ const ytDlp = new YTDlpWrap(paths.ytDlpBinary);
 const execFileAsync = promisify(execFile);
 const recentPinterestResultsByQuery = new Map();
 const videoInfoCache = new Map(); // Cache videoInfo to avoid redundant queries
+const tikTokProfileFile = path.join(paths.sessionPath, 'tiktok-extractor-profile.json');
+
+async function fileExists(filePath) {
+    try {
+        await fs.access(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function resolveAbsolutePath(value) {
+    const raw = String(value || '').trim();
+    if (!raw) {
+        return null;
+    }
+
+    return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+}
+
+function isTikTokAntiBotError(error) {
+    const message = String(error?.stderr || error?.message || error || '');
+    return /429|too many requests|403|forbidden|authorization|cookie|login required|sign in/i.test(message);
+}
+
+function createDigitString(length) {
+    let value = '';
+    for (let index = 0; index < length; index += 1) {
+        value += String(Math.floor(Math.random() * 10));
+    }
+    return value;
+}
+
+async function getTikTokExtractorProfile() {
+    await fs.mkdir(paths.sessionPath, { recursive: true });
+
+    try {
+        const raw = await fs.readFile(tikTokProfileFile, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed?.iid && parsed?.deviceId) {
+            return {
+                iid: String(parsed.iid),
+                deviceId: String(parsed.deviceId),
+            };
+        }
+    } catch {
+        // create a new profile below
+    }
+
+    const profile = {
+        iid: createDigitString(19),
+        deviceId: createDigitString(19),
+    };
+
+    try {
+        await fs.writeFile(tikTokProfileFile, JSON.stringify(profile, null, 2), 'utf8');
+    } catch {
+        // ignore profile persistence errors; the in-memory profile is still usable
+    }
+
+    return profile;
+}
+
+async function getTikTokExtractorArgs() {
+    const profile = await getTikTokExtractorProfile();
+    return [
+        '--extractor-args',
+        `tiktok:app_info=${profile.iid};device_id=${profile.deviceId}`,
+    ];
+}
+
+function appendTikTokBaseArgs(args) {
+    args.push('--add-header', 'Referer:https://www.tiktok.com/');
+    args.push('--add-header', 'Origin:https://www.tiktok.com');
+    args.push('--add-header', 'Accept-Language:es-ES,es;q=0.9,en;q=0.8');
+    args.push(
+        '--add-header',
+        'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    );
+    args.push('--impersonate', 'chrome');
+    args.push('--concurrent-fragments', '1');
+    args.push('--sleep-interval', '3');
+    args.push('--max-sleep-interval', '4');
+    args.push('--retry-sleep', '10');
+
+    if (performance.tikTokProxyUrl) {
+        args.push('--proxy', performance.tikTokProxyUrl);
+    }
+}
+
+async function getTikTokDownloadStrategies() {
+    const strategies = [];
+    const seen = new Set();
+
+    const addStrategy = (label, extraArgs) => {
+        const key = extraArgs.join('\u0000');
+        if (seen.has(key)) {
+            return;
+        }
+
+        seen.add(key);
+        strategies.push({ label, extraArgs });
+    };
+
+    addStrategy('mobile', await getTikTokExtractorArgs());
+
+    const explicitCookiesPath = resolveAbsolutePath(performance.tikTokCookiesFile);
+    if (explicitCookiesPath && await fileExists(explicitCookiesPath)) {
+        addStrategy(`cookies:${explicitCookiesPath}`, ['--cookies', explicitCookiesPath]);
+    }
+
+    const fallbackCookiesPath = path.resolve(process.cwd(), 'cookies.txt');
+    if (
+        fallbackCookiesPath !== explicitCookiesPath &&
+        await fileExists(fallbackCookiesPath)
+    ) {
+        addStrategy(`cookies:${fallbackCookiesPath}`, ['--cookies', fallbackCookiesPath]);
+    }
+
+    if (performance.useBrowserCookies) {
+        addStrategy(
+            `browser:${performance.browserForCookies}`,
+            ['--cookies-from-browser', performance.browserForCookies],
+        );
+    }
+
+    addStrategy('plain', []);
+    return strategies;
+}
 
 async function execFFmpeg(args, opts = {}) {
     const maxBuffer = Number(
@@ -271,6 +400,42 @@ async function getYtDlpInfoSafe(input) {
     }
 
     return result;
+}
+
+async function getTikTokInfoSafe(url) {
+    const target = String(url || "").trim();
+    if (!target) {
+        return null;
+    }
+
+    const strategies = await getTikTokDownloadStrategies();
+
+    for (const strategy of strategies) {
+        try {
+            const raw = await ytDlp.execPromise([
+                target,
+                "--dump-single-json",
+                "--skip-download",
+                "--no-warnings",
+                "--no-playlist",
+                "--no-check-certificates",
+                "--extractor-retries",
+                String(performance.downloadRetries),
+                ...strategy.extraArgs,
+            ]);
+
+            const parsed = JSON.parse(String(raw || "{}"));
+            if (parsed) {
+                return parsed;
+            }
+        } catch (error) {
+            if (!isTikTokAntiBotError(error)) {
+                continue;
+            }
+        }
+    }
+
+    return null;
 }
 
 async function findDownloadedFile(prefix, preferredExtensions = []) {
@@ -1272,11 +1437,13 @@ async function downloadVideo(url) {
     const id = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const outputTemplate = path.join(paths.tempDir, `${id}.%(ext)s`);
 
-    let metadata = null;
-    metadata = await getYtDlpInfoSafe(url);
-
     const isTikTok = /tiktok\.com/i.test(url);
-    const useBrowserCookies = performance.useBrowserCookies && isTikTok;
+    let metadata = null;
+    if (isTikTok) {
+        metadata = await getTikTokInfoSafe(url);
+    } else {
+        metadata = await getYtDlpInfoSafe(url);
+    }
 
     const baseArgs = [
         url,
@@ -1288,6 +1455,8 @@ async function downloadVideo(url) {
         "--concurrent-fragments",
         String(performance.downloadConcurrentFragments),
         "--retries",
+        String(performance.downloadRetries),
+        "--extractor-retries",
         String(performance.downloadRetries),
         "--fragment-retries",
         String(performance.downloadRetries),
@@ -1301,29 +1470,10 @@ async function downloadVideo(url) {
         baseArgs.push("--max-filesize", `${limits.maxFileSizeMb}M`);
     }
 
-    // Add headers and cookies for TikTok to bypass 403 restrictions
     if (isTikTok) {
-        baseArgs.push("--add-header", "Referer:https://www.tiktok.com/");
-        baseArgs.push("--add-header", "Origin:https://www.tiktok.com");
-        baseArgs.push("--add-header", "Accept-Language:es-ES,es;q=0.9,en;q=0.8");
-        baseArgs.push(
-            "--add-header",
-            "User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        );
-        baseArgs.push("--impersonate", "chrome");
-        baseArgs.push("--concurrent-fragments", "1");
-        // Avoid TikTok rate limits (HTTP 429)
-        baseArgs.push("--sleep-interval", "3");
-        baseArgs.push("--max-sleep-interval", "4");
-        baseArgs.push("--retry-sleep", "10");
-        if (performance.tikTokProxyUrl) {
-            baseArgs.push("--proxy", performance.tikTokProxyUrl);
-        }
-        if (performance.tikTokCookiesFile) {
-            baseArgs.push("--cookies", performance.tikTokCookiesFile);
-        } else if (useBrowserCookies) {
-            baseArgs.push("--cookies-from-browser", performance.browserForCookies);
-        }
+        const extractorArgs = await getTikTokExtractorArgs();
+        baseArgs.push(...extractorArgs);
+        appendTikTokBaseArgs(baseArgs);
     }
 
     // Add speed limit if configured
@@ -1341,58 +1491,67 @@ async function downloadVideo(url) {
             "best[ext=mp4]/best",
         ];
 
+    const downloadStrategies = isTikTok
+        ? await getTikTokDownloadStrategies()
+        : [{ label: "default", extraArgs: [] }];
+
     let lastError = null;
-    for (let index = 0; index < formatCandidates.length; index += 1) {
-        const format = formatCandidates[index];
-        try {
-            await new Promise((resolve, reject) => {
-                ytDlp
-                    .exec([...baseArgs, "-f", format])
-                    .on("ytDlpEvent", (eventType, eventData) => {
-                        if (eventType === "download") {
-                            process.stdout.write(`\r⏬ ${eventData}`);
-                        }
-                    })
-                    .on("error", reject)
-                    .on("close", resolve);
-            });
-            console.log(); // salto de línea al terminar
-            lastError = null;
-            break;
-        } catch (error) {
-            lastError = error;
-            const message = String(error?.stderr || error?.message || "");
+    let downloadSucceeded = false;
+    for (let strategyIndex = 0; strategyIndex < downloadStrategies.length; strategyIndex += 1) {
+        const strategy = downloadStrategies[strategyIndex];
 
-            // If TikTok download fails with browser cookies, retry without them
-            if (
-                useBrowserCookies &&
-                /tiktok|403|authorization|cookie/i.test(message)
-            ) {
-                console.log(
-                    "TikTok descarga falló con cookies del navegador, reintentando sin ellas...",
-                );
-                // Remove cookies args and retry
-                const argsWithoutCookies = baseArgs.filter((arg, idx, arr) => {
-                    return !(
-                        arg === "--cookies-from-browser" ||
-                        (idx > 0 && arr[idx - 1] === "--cookies-from-browser")
-                    );
+        for (let index = 0; index < formatCandidates.length; index += 1) {
+            const format = formatCandidates[index];
+            try {
+                await new Promise((resolve, reject) => {
+                    ytDlp
+                        .exec([...baseArgs, ...strategy.extraArgs, "-f", format])
+                        .on("ytDlpEvent", (eventType, eventData) => {
+                            if (eventType === "download") {
+                                process.stdout.write(`\r⏬ ${eventData}`);
+                            }
+                        })
+                        .on("error", reject)
+                        .on("close", resolve);
                 });
+                console.log(); // salto de línea al terminar
+                lastError = null;
+                downloadSucceeded = true;
+                break;
+            } catch (error) {
+                lastError = error;
+                const message = String(error?.stderr || error?.message || "");
+                const isLastFormat = index === formatCandidates.length - 1;
+                const isLastStrategy = strategyIndex === downloadStrategies.length - 1;
+                const isFormatUnavailable = /requested format is not available/i.test(message);
+                const shouldTryNextStrategy = isTikTok && !isLastStrategy && !isFormatUnavailable
+                    ? true
+                    : isTikTok && !isLastStrategy && isTikTokAntiBotError(error)
+                        ? true
+                        : false;
 
-                try {
-                    await ytDlp.execPromise([...argsWithoutCookies, "-f", format]);
-                    lastError = null;
-                    break;
-                } catch (retryError) {
-                    lastError = retryError;
+                if (isFormatUnavailable && !isLastFormat) {
+                    continue;
                 }
-            }
 
-            const canRetry = /requested format is not available/i.test(message);
-            const isLastCandidate = index === formatCandidates.length - 1;
-            if (!canRetry || isLastCandidate) {
+                if (shouldTryNextStrategy) {
+                    break;
+                }
+
+                if (isFormatUnavailable && !isLastStrategy) {
+                    break;
+                }
+
+                if (!isLastStrategy) {
+                    break;
+                }
+
                 throw lastError || error;
             }
+        }
+
+        if (downloadSucceeded) {
+            break;
         }
     }
 
@@ -1608,12 +1767,10 @@ async function downloadAudio(url) {
     const id = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const outputTemplate = path.join(paths.tempDir, `${id}.%(ext)s`);
 
-    let metadata = null;
-    try {
-        metadata = await ytDlp.getVideoInfo(url);
-    } catch {
-        metadata = null;
-    }
+    const isTikTok = /tiktok\.com/i.test(url);
+    const metadata = isTikTok
+        ? await getTikTokInfoSafe(url)
+        : await getYtDlpInfoSafe(url);
 
     const args = [
         url,
@@ -1629,6 +1786,8 @@ async function downloadAudio(url) {
         "192",
         "--retries",
         String(performance.downloadRetries),
+        "--extractor-retries",
+        String(performance.downloadRetries),
         "--fragment-retries",
         String(performance.downloadRetries),
         "--socket-timeout",
@@ -1638,6 +1797,12 @@ async function downloadAudio(url) {
         "-f",
         "bestaudio/best",
     ];
+
+    if (isTikTok) {
+        const extractorArgs = await getTikTokExtractorArgs();
+        args.push(...extractorArgs);
+        appendTikTokBaseArgs(args);
+    }
 
     // Add max-filesize only if configured
     if (limits.maxFileSizeMb > 0) {
@@ -1652,7 +1817,27 @@ async function downloadAudio(url) {
         );
     }
 
-    await ytDlp.execPromise(args);
+    const downloadStrategies = isTikTok
+        ? await getTikTokDownloadStrategies()
+        : [{ label: "default", extraArgs: [] }];
+
+    let lastError = null;
+    for (const strategy of downloadStrategies) {
+        try {
+            await ytDlp.execPromise([...args, ...strategy.extraArgs]);
+            lastError = null;
+            break;
+        } catch (error) {
+            lastError = error;
+            if (!isTikTok || strategy === downloadStrategies[downloadStrategies.length - 1]) {
+                throw error;
+            }
+        }
+    }
+
+    if (lastError) {
+        throw lastError;
+    }
 
     const sourcePath = await findDownloadedFile(id, [
         ".mp3",

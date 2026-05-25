@@ -6,9 +6,9 @@ const MENU_TEXT =
     '• *.ping* → medir respuesta del bot\n' +
     '• *.s* → crear sticker desde imagen\n' +
     '\n'+
-    '• *.ds <url>* → descargar videos\n' +
-    '• *.dsb <titulo>* → buscar 3 videos\n' +
-    '\n'+
+    //'• *.ds <url>* → descargar videos\n' +
+    //'• *.dsb <titulo>* → buscar 3 videos\n' +
+    //'\n'+
     '• *.pt <busqueda> <cantidad>* → buscar en Pinterest (max 15)\n' +
     '\n'+
     '• *.mp3 <url>* → audio reproducible\n' +
