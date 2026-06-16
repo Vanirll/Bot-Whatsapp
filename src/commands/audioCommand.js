@@ -14,6 +14,7 @@ async function handleAudioCommand({ client, message, lowerText, text, options })
     if (!isAudioCommand) {
         return false;
     }
+    console.time('TOTAL_MP3');
 
     const sendAsDocument = lowerText.startsWith('.mp3d') || lowerText.startsWith('#mp3d');
 
@@ -40,7 +41,12 @@ async function handleAudioCommand({ client, message, lowerText, text, options })
                 : '🎵 Descargando audio en mp3, espera un momento...');
         }
 
+        console.log('[MP3] Antes de downloadAudio');
+
         const { filePath, title, audioFileName } = await downloadAudio(url);
+
+        console.log('[MP3] Después de downloadAudio');
+
         downloadedFile = filePath;
 
         try {
@@ -50,7 +56,9 @@ async function handleAudioCommand({ client, message, lowerText, text, options })
         }
 
         if (sendAsDocument) {
+            console.log('[MP3] Antes de enviar');
             await sendAudioAsDocument(client, message.from, filePath, title, audioFileName);
+            console.log('[MP3] Después de enviar');
         } else {
             await sendAudioInline(client, message.from, filePath, title, audioFileName);
         }

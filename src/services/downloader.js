@@ -358,26 +358,45 @@ async function ensureYtDlpBinary() {
 }
 
 async function getYtDlpInfoSafe(input) {
+    console.log("[META] Entrando");
+
     const target = String(input || "").trim();
+
+    console.log("[META] URL:", target);
+
     if (!target) {
         return null;
     }
 
-    // Check cache first
     const cacheEntry = videoInfoCache.get(target);
     if (cacheEntry && cacheEntry.expiresAt > Date.now()) {
+        console.log("[META] Cache HIT");
         return cacheEntry.data;
     }
 
     let result = null;
+
     try {
-        result = await ytDlp.getVideoInfo(target);
-    } catch {
-        // For image-only Pinterest pins, --dump-single-json works better than getVideoInfo().
+        console.log("[META] Antes getVideoInfo");
+
+        const raw = await ytDlp.execPromise([
+            target,
+            "--dump-single-json",
+            "--skip-download",
+            "--no-warnings",
+        ]);
+
+        result = JSON.parse(String(raw || "{}"));
+
+        console.log("[META] Después getVideoInfo");
+    } catch (error) {
+        console.log("[META] Error getVideoInfo:", error?.message);
     }
 
     if (!result) {
         try {
+            console.log("[META] Antes dump-single-json");
+
             const raw = await ytDlp.execPromise([
                 target,
                 "--dump-single-json",
@@ -385,13 +404,15 @@ async function getYtDlpInfoSafe(input) {
                 "--no-warnings",
             ]);
 
+            console.log("[META] Después dump-single-json");
+
             result = JSON.parse(String(raw || "{}"));
-        } catch {
+        } catch (error) {
+            console.log("[META] Error dump-single-json:", error?.message);
             return null;
         }
     }
 
-    // Store in cache with TTL
     if (result) {
         videoInfoCache.set(target, {
             data: result,
@@ -1762,15 +1783,20 @@ async function downloadVideoBySearch(query) {
 }
 
 async function downloadAudio(url) {
+    console.log("[MP3] Inicio downloadAudio");
     await ensureTempDir();
+    console.log("[MP3] TempDir OK");
 
     const id = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
     const outputTemplate = path.join(paths.tempDir, `${id}.%(ext)s`);
+    console.log("[MP3] Antes metadata");
 
     const isTikTok = /tiktok\.com/i.test(url);
     const metadata = isTikTok
-        ? await getTikTokInfoSafe(url)
-        : await getYtDlpInfoSafe(url);
+        ? await getYtDlpInfoSafe(url)
+        : await getTikTokInfoSafe(url);
+    
+    console.log("[MP3] Metadata OK");
 
     const args = [
         url,
@@ -1779,9 +1805,8 @@ async function downloadAudio(url) {
         "--no-playlist",
         "--no-warnings",
         "--no-check-certificates",
-        "--extract-audio",
-        "--audio-format",
-        "mp3",
+        "--ffmpeg-location",
+        path.dirname(ffmpegPath),
         "--audio-quality",
         "192",
         "--retries",
@@ -1824,7 +1849,9 @@ async function downloadAudio(url) {
     let lastError = null;
     for (const strategy of downloadStrategies) {
         try {
+            console.log("[MP3] Iniciando descarga");
             await ytDlp.execPromise([...args, ...strategy.extraArgs]);
+            console.log("[MP3] Descarga terminada");
             lastError = null;
             break;
         } catch (error) {
@@ -1855,6 +1882,7 @@ async function downloadAudio(url) {
         (Array.isArray(metadata?.thumbnails)
             ? metadata.thumbnails.map((item) => item?.url).find(Boolean)
             : null);
+    console.log("[MP3] Thumbnail:", thumbnailUrl);
     const pathWithCover = await embedMp3CoverArt(initialPath, thumbnailUrl, id);
     const stats = await fs.stat(pathWithCover);
 
@@ -1864,7 +1892,8 @@ async function downloadAudio(url) {
             `El archivo supera el limite de ${limits.maxFileSizeMb}MB.`,
         );
     }
-
+    console.log("[MP3] Metadata:", metadata);
+    console.log("[MP3] Title:", metadata?.title);
     const title = metadata?.title || "Audio descargado";
     const safeBaseName = sanitizeFileName(title, "audio");
     const renamedPath = await buildUniqueFilePath(
