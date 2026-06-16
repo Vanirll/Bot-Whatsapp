@@ -6,6 +6,7 @@ const { paths } = require('./config');
 const { ensureYtDlpBinary } = require('./services/downloader');
 const { registerMessageHandler } = require('./handlers/messageHandler');
 const { acquireProcessLock, releaseProcessLock } = require('./utils/processLock');
+const { ytDlp } = require('./services/downloader');
 
 const puppeteerArgs = [
     '--no-sandbox',
@@ -63,6 +64,9 @@ async function startBot() {
     try {
         await acquireProcessLock();
         await ensureYtDlpBinary();
+
+        console.log("yt-dlp:", paths.ytDlpBinary);
+
 
         console.log('Iniciando cliente de WhatsApp...');
 

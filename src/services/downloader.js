@@ -1591,7 +1591,14 @@ async function downloadVideo(url) {
     ]);
     console.log("[VIDEO] Descarga terminada");
     console.log("[VIDEO] Iniciando conversión");
-    const filePath = await convertToWhatsAppVideo(downloadedPath, id);
+    const ext = path.extname(downloadedPath).toLowerCase();
+
+    if (ext === '.mp4') {
+        console.log('[VIDEO] MP4 detectado, omitiendo conversión');
+        filePath = downloadedPath;
+    } else {
+        filePath = await convertToWhatsAppVideo(downloadedPath, id);
+    }
     console.log("[VIDEO] Conversión terminada");
     const stats = await fs.stat(filePath);
 

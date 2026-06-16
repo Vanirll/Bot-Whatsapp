@@ -60,7 +60,7 @@ const performance = {
     // Use browser cookies for TikTok downloads (to bypass restrictions)
     useBrowserCookies: String(process.env.TT_USE_BROWSER_COOKIES || 'true').toLowerCase() === 'true',
     // Browser to use for cookie extraction (chrome, firefox, edge, safari, brave, vivaldi)
-    browserForCookies: String(process.env.TT_BROWSER || 'chrome').toLowerCase().trim(),
+    browserForCookies: String(process.env.TT_BROWSER || 'edge').toLowerCase().trim(),
     // Optional proxy for TikTok downloads
     tikTokProxyUrl: String(process.env.TT_PROXY_URL || '').trim(),
     // Optional cookies.txt path for TikTok downloads
