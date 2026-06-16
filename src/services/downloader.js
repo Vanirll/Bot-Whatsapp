@@ -381,6 +381,7 @@ async function getYtDlpInfoSafe(input) {
 
         const raw = await ytDlp.execPromise([
             target,
+            "--no-playlist",
             "--dump-single-json",
             "--skip-download",
             "--no-warnings",
@@ -1588,7 +1589,10 @@ async function downloadVideo(url) {
         ".m4v",
         ".avi",
     ]);
+    console.log("[VIDEO] Descarga terminada");
+    console.log("[VIDEO] Iniciando conversión");
     const filePath = await convertToWhatsAppVideo(downloadedPath, id);
+    console.log("[VIDEO] Conversión terminada");
     const stats = await fs.stat(filePath);
 
     if (stats.size > limits.maxFileSizeBytes) {
@@ -1759,7 +1763,11 @@ async function downloadVideoBySearch(query) {
         ".m4v",
         ".avi",
     ]);
+    //para dsb
+    console.log("[VIDEO] Descarga terminada");
+    console.log("[VIDEO] Iniciando conversión");
     const filePath = await convertToWhatsAppVideo(downloadedPath, id);
+    console.log("[VIDEO] Conversión terminada");
     const stats = await fs.stat(filePath);
 
     if (stats.size > limits.maxFileSizeBytes) {
@@ -1795,7 +1803,7 @@ async function downloadAudio(url) {
     const metadata = isTikTok
         ? await getYtDlpInfoSafe(url)
         : await getTikTokInfoSafe(url);
-    
+
     console.log("[MP3] Metadata OK");
 
     const args = [
