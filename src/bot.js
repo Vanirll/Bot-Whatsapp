@@ -26,7 +26,7 @@ const puppeteerArgs = [
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: paths.sessionPath }),
     puppeteer: {
-        headless: true,
+        headless: false,
         args: puppeteerArgs
     }
 });
